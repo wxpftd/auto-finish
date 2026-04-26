@@ -62,8 +62,9 @@ jobs:
       - name: Typecheck
         run: pnpm -r typecheck
 
-      # Default `pnpm -r test` skips the Daytona integration suite — those
-      # tests gate on `DAYTONA_INTEGRATION=1` via `describe.skipIf(...)`.
+      # Default `pnpm -r test` skips the OpenSandbox integration suite —
+      # those tests gate on `OPENSANDBOX_INTEGRATION=1` via
+      # `describe.skipIf(...)`.
       # We deliberately do not set that env var here.
       - name: Test
         run: pnpm -r test

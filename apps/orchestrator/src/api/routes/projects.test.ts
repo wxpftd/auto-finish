@@ -25,7 +25,7 @@ function jsonRequest(path: string, init: RequestInit = {}): Request {
 const validProjectBody = {
   name: 'demo',
   description: 'demo project',
-  sandbox_config: { provider: 'daytona' as const, image: 'node:20' },
+  sandbox_config: { provider: 'opensandbox' as const, image: 'node:20' },
   claude_config: { credentials_source: 'host_mount' as const },
 };
 

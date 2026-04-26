@@ -3,7 +3,7 @@
   "name": "demo-fullstack",
   "description": "two-repo demo project",
   "sandbox_config": {
-    "provider": "daytona",
+    "provider": "opensandbox",
     "image": "node:20"
   },
   "claude_config": {

@@ -10,8 +10,8 @@
 
 import type { Db } from '../db/index.js';
 import type { EventBus } from '../eventbus/index.js';
+import type { SandboxConfig as ProjectSandboxConfig } from '@auto-finish/project-schema';
 import type {
-  SandboxConfig,
   SandboxProvider,
   SandboxSession,
 } from '../sandbox/interface.js';
@@ -84,7 +84,7 @@ export interface RunnerDeps {
   db: Db;
   bus: EventBus;
   /** Pick a SandboxProvider given a project's sandbox_config. */
-  makeSandboxProvider: (sandboxConfig: SandboxConfig) => SandboxProvider;
+  makeSandboxProvider: (sandboxConfig: ProjectSandboxConfig) => SandboxProvider;
   /** Default: real bootstrapEnv (clone + manifest + creds). */
   bootstrapEnv?: BootstrapEnvFn;
   /** Default: real injectClaudeCredentials. */

@@ -15,8 +15,16 @@
  *   ['false']                   -> exit 1
  *   ['exit', code]              -> exit `code` (parsed as int)
  *   ['sleep', ms]               -> resolves after `ms` ms; useful for timeout tests
- *   ['/bin/sh', '-c', script]   -> always exits 1 with stderr = script,
- *                                  intended as the "configurable error" knob
+ *   ['/bin/sh', '-c', script]   -> default: exit 1 with stderr = script
+ *                                  (the "configurable error" knob).
+ *                                  EXCEPT: a small set of known script
+ *                                  shapes used by the warm-fallback module
+ *                                  are honored against the in-memory FS.
+ *                                  See `executeShellScript()` below.
+ *   ['find', root, '-type', 'f', '-print']
+ *                              -> walks the in-memory file map and emits
+ *                                  every absolute path under `root` on stdout.
+ *                                  Exit 0 even if `root` has no files.
  *   ['stream-lines', ...lines]  -> for startStream tests; emits each `line`
  *                                  as a separate stdout event then exits 0
  */
@@ -258,11 +266,47 @@ class InMemorySession implements SandboxSession {
     }
 
     if (head === '/bin/sh') {
-      // Configurable error knob: ['/bin/sh', '-c', script] always returns
+      // Configurable error knob: ['/bin/sh', '-c', script] *defaults* to
       // exit 1 with the script echoed on stderr. Tests use this to verify
       // non-zero exit codes are returned (not thrown).
+      //
+      // We additionally honor a narrow set of known script shapes used by
+      // the warm-fallback module (snapshotArtifacts) against the in-memory
+      // FS. Anything outside that set falls through to the legacy "exit 1
+      // with stderr = script" behaviour so existing tests still pass.
       const script = argv[2] ?? '';
+      const synth = executeShellScript(script, this.#state.files);
+      if (synth !== null) return synth;
       return { exit_code: 1, stdout: '', stderr: script };
+    }
+
+    if (head === 'find') {
+      // Minimal `find <root> -type f -print` recognizer. Walks the in-memory
+      // file map. We deliberately ignore other flags / predicates because
+      // the only caller we want to support is `snapshotArtifacts`.
+      const root = argv[1];
+      if (root === undefined) {
+        return {
+          exit_code: 1,
+          stdout: '',
+          stderr: 'find: missing root\n',
+        };
+      }
+      const prefix = root.endsWith('/') ? root : root + '/';
+      const matches: string[] = [];
+      for (const key of this.#state.files.keys()) {
+        if (key === root || key.startsWith(prefix)) {
+          matches.push(key);
+        }
+      }
+      // POSIX `find` orders depth-first by directory listing, but the
+      // snapshot/restore round-trip is order-independent. Stable sort.
+      matches.sort();
+      return {
+        exit_code: 0,
+        stdout: matches.length === 0 ? '' : matches.join('\n') + '\n',
+        stderr: '',
+      };
     }
 
     if (head === 'stream-lines') {
@@ -281,6 +325,56 @@ class InMemorySession implements SandboxSession {
       stderr: `${head}: command not found\n`,
     };
   }
+}
+
+/**
+ * Recognize the small set of shell scripts the warm-fallback module emits.
+ * Returns a synthetic RunResult on a hit, `null` to fall through to the
+ * legacy "echo on stderr" behaviour.
+ *
+ * Currently supported:
+ *   `[ -d "<path>" ] && echo present || echo absent` — directory-existence
+ *   probe used by `snapshotArtifacts`. We treat the in-memory FS as having
+ *   directory `<path>` iff at least one file key starts with `<path>/`.
+ */
+function executeShellScript(
+  script: string,
+  files: Map<string, Uint8Array>,
+): RunResult | null {
+  const dirProbeMatch = script.match(
+    /^\[ -d "([^"]+)" \] && echo present \|\| echo absent$/,
+  );
+  if (dirProbeMatch) {
+    const path = dirProbeMatch[1]!;
+    const prefix = path.endsWith('/') ? path : path + '/';
+    const present = Array.from(files.keys()).some((k) => k.startsWith(prefix));
+    return {
+      exit_code: 0,
+      stdout: (present ? 'present' : 'absent') + '\n',
+      stderr: '',
+    };
+  }
+
+  // Forward `find <root> -type f -print` invoked through `sh -c` to the
+  // dedicated find recognizer. We don't currently issue this shape, but it
+  // future-proofs callers that wrap the listing in a shell pipeline.
+  const findMatch = script.match(/^find "([^"]+)" -type f -print$/);
+  if (findMatch) {
+    const root = findMatch[1]!;
+    const prefix = root.endsWith('/') ? root : root + '/';
+    const matches: string[] = [];
+    for (const key of files.keys()) {
+      if (key === root || key.startsWith(prefix)) matches.push(key);
+    }
+    matches.sort();
+    return {
+      exit_code: 0,
+      stdout: matches.length === 0 ? '' : matches.join('\n') + '\n',
+      stderr: '',
+    };
+  }
+
+  return null;
 }
 
 async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {

@@ -5,9 +5,9 @@
  * spawn child processes there with inherited env, so Claude CLI finds host
  * credentials automatically (including macOS keychain). This is NOT a real
  * sandbox — there is no isolation. It exists only so we can drive
- * `runRequirement` end-to-end without standing up Daytona.
+ * `runRequirement` end-to-end without standing up an OpenSandbox server.
  *
- * Production must use DaytonaProvider / E2BProvider.
+ * Production must use OpenSandboxProvider.
  */
 
 import { spawn } from 'node:child_process';

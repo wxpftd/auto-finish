@@ -7,9 +7,12 @@
 #   2. Replace the fixture git URLs below with your real repos.
 #   3. Make sure ~/.claude/.credentials.json exists on the host
 #      (claude_config.credentials_source = host_mount).
-#   4. Point your sandbox_config.daytona_endpoint at a running Daytona server
-#      (the bundled docker-compose.yml at the workspace root brings one up
-#      on http://localhost:3986).
+#   4. Start the OpenSandbox sandbox-server (default endpoint
+#      http://localhost:8080). The bundled docker-compose.yml at the
+#      workspace root brings one up.
+#   5. (Optional, recommended for production) Pre-build a warm image with
+#      deps baked in: see examples/warm-image.Dockerfile, then set
+#      warm_strategy: baked_image + warm_image + base_image below.
 #
 # This project pairs with ./pipeline.yaml — an override of the default
 # 4-stage pipeline that swaps the `验证` stage's test commands for the
@@ -54,9 +57,15 @@ repos:
 default_pipeline_id: two-repo-demo-pipeline
 
 sandbox_config:
-  provider: daytona
-  daytona_endpoint: http://localhost:3986
+  provider: opensandbox
+  endpoint: http://localhost:8080
   image: ghcr.io/auto-finish-examples/two-repo-sandbox:latest
+  # warm_strategy=cold_only is the safe default — first-run friendly, slow.
+  # Switch to baked_image once you've built a warm image:
+  #   warm_strategy: baked_image
+  #   warm_image: ghcr.io/auto-finish-examples/two-repo-sandbox:warm
+  #   base_image: ghcr.io/auto-finish-examples/two-repo-sandbox:base
+  warm_strategy: cold_only
   env:
     NODE_ENV: development
     PORT: "3000"

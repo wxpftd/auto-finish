@@ -33,19 +33,31 @@ export function isGitUrl(value: string): boolean {
 }
 
 /**
- * Sandbox provider selection. `local` is a fallback raw-Docker path; the
- * default and remote modes both go through Daytona; `e2b` and `microsandbox`
- * are alternative single-binary backends behind the same SandboxProvider
- * interface.
+ * Sandbox provider selection. `opensandbox` is the production default
+ * (Apache 2.0 / CNCF — see decision 2 in the plan). `in_memory` is the
+ * test reference implementation.
  */
-export const SandboxProviderSchema = z.enum([
-  'local',
-  'daytona',
-  'e2b',
-  'microsandbox',
-]);
+export const SandboxProviderSchema = z.enum(['opensandbox', 'in_memory']);
 
 export type SandboxProviderKind = z.infer<typeof SandboxProviderSchema>;
+
+/**
+ * Strategy for warm-starting a sandbox so the agent doesn't pay clone+install
+ * cost on every Requirement (decision 4 in the plan).
+ *
+ *   - `baked_image`     — per-project Docker image with code + deps baked in
+ *   - `shared_volume`   — fresh container, deps mounted from a Docker named
+ *                          volume / PVC declared via OpenSandbox `volumes[]`
+ *   - `cold_only`       — every run does a full clone + install (slow but
+ *                          always works; useful for first-time onboarding)
+ */
+export const WarmStrategySchema = z.enum([
+  'baked_image',
+  'shared_volume',
+  'cold_only',
+]);
+
+export type WarmStrategy = z.infer<typeof WarmStrategySchema>;
 
 /**
  * Sandbox configuration for a project. Applied when the orchestrator creates
@@ -53,22 +65,27 @@ export type SandboxProviderKind = z.infer<typeof SandboxProviderSchema>;
  */
 export const SandboxConfigSchema = z
   .object({
-    provider: SandboxProviderSchema.describe(
-      'Which SandboxProvider implementation to use.',
+    provider: SandboxProviderSchema.default('opensandbox').describe(
+      'Which SandboxProvider implementation to use; defaults to opensandbox.',
     ),
-    daytona_endpoint: z
+    endpoint: z
       .string()
       .min(1)
       .optional()
       .describe(
-        'Daytona server URL; only consulted when provider === "daytona". ' +
-          'Falls back to the orchestrator-level default.',
+        'Sandbox server URL (provider-specific). For opensandbox this is ' +
+          'the sandbox-server FastAPI base URL. Falls back to the ' +
+          'orchestrator-level default.',
       ),
     image: z
       .string()
       .min(1)
       .optional()
-      .describe('Container image used to back the sandbox.'),
+      .describe(
+        'Container image used to back the sandbox. When warm_strategy is ' +
+          '"baked_image", prefer warm_image / base_image instead — image is ' +
+          'ignored in that case.',
+      ),
     env: z
       .record(z.string(), z.string())
       .optional()
@@ -80,8 +97,91 @@ export const SandboxConfigSchema = z
         'Shell snippets executed inside the sandbox at create time, after ' +
           'repo clones but before the first stage runs.',
       ),
+    warm_strategy: WarmStrategySchema.default('cold_only').describe(
+      'Warm-start strategy; see decision 4 in the plan. Default is "cold_only" ' +
+        'so unconfigured projects work out of the box (slow but always valid). ' +
+        '"baked_image" is the *recommended* production strategy — opt in by ' +
+        'setting warm_strategy="baked_image" + warm_image + base_image.',
+    ),
+    warm_image: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'warm_strategy="baked_image": the warm image tag containing code + ' +
+          'deps + build cache (e.g. auto-finish/<project-id>:warm).',
+      ),
+    base_image: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'warm_strategy="baked_image": the cold-restart base image (runtime ' +
+          'only, no deps). Used by Tier 2 fallback when an in-flight stage ' +
+          'fails to install deps against the warm image.',
+      ),
+    warm_volume_claim: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'warm_strategy="shared_volume": Docker named volume name or PVC ' +
+          'claimName holding deps (node_modules / .venv / etc.).',
+      ),
+    warm_mount_path: z
+      .string()
+      .min(1)
+      .optional()
+      .refine((p) => p === undefined || p.startsWith('/'), {
+        message: 'warm_mount_path must be an absolute POSIX path starting with "/"',
+      })
+      .describe(
+        'warm_strategy="shared_volume": absolute path inside the sandbox ' +
+          'where the warm volume mounts (e.g. /workspace/.deps).',
+      ),
+    warm_volume_backend: z
+      .enum(['host', 'pvc', 'ossfs'])
+      .default('host')
+      .describe(
+        'shared_volume backend selector (OSEP-0003): "host" = docker named ' +
+          'volume / 本机绝对路径; "pvc" = K8s PersistentVolumeClaim ' +
+          '(claimName 复用 warm_volume_claim); "ossfs" = Aliyun OSS bucket ' +
+          '(Phase 1.6 暂不实现，provider 会抛 not yet implemented). ' +
+          '只对 OpenSandboxProvider 生效；其他 provider 忽略 volumes 字段。',
+      ),
   })
-  .strict();
+  .strict()
+  .superRefine((cfg, ctx) => {
+    // Cross-field consistency: baked_image needs warm_image; shared_volume
+    // needs both warm_volume_claim and warm_mount_path. We accept missing
+    // fields silently for cold_only since nothing extra is needed.
+    if (cfg.warm_strategy === 'baked_image' && cfg.warm_image === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['warm_image'],
+        message:
+          'warm_image is required when warm_strategy="baked_image" (see decision 4)',
+      });
+    }
+    if (cfg.warm_strategy === 'shared_volume') {
+      if (cfg.warm_volume_claim === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['warm_volume_claim'],
+          message:
+            'warm_volume_claim is required when warm_strategy="shared_volume"',
+        });
+      }
+      if (cfg.warm_mount_path === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['warm_mount_path'],
+          message:
+            'warm_mount_path is required when warm_strategy="shared_volume"',
+        });
+      }
+    }
+  });
 
 export type SandboxConfig = z.infer<typeof SandboxConfigSchema>;
 

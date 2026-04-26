@@ -1,5 +1,5 @@
 # Example auto-finish project: two repos (frontend Node + backend Python),
-# Daytona sandbox provider, host-mounted Claude credentials.
+# OpenSandbox provider with baked_image warm strategy, host-mounted Claude credentials.
 #
 # default_pipeline_id references the bundled pipeline-schema example
 # (packages/pipeline-schema/examples/default-pipeline.yaml, id: "default").
@@ -35,15 +35,20 @@ repos:
 default_pipeline_id: default
 
 sandbox_config:
-  provider: daytona
-  daytona_endpoint: http://localhost:3986
-  image: ghcr.io/example-org/auto-finish-sandbox:latest
+  provider: opensandbox
+  endpoint: http://localhost:8080
+  # warm_strategy=baked_image: agent boots from warm_image (code + deps baked
+  # in). On dep-install failure, runner falls back to base_image and does a
+  # fresh clone+install (Tier 2 cold-restart, see decision 4 in the plan).
+  warm_strategy: baked_image
+  warm_image: ghcr.io/example-org/example-app:warm
+  base_image: ghcr.io/example-org/example-app:base
   env:
     NODE_ENV: development
     PYTHONUNBUFFERED: "1"
   setup_commands:
-    - cd /workspace/frontend && npm ci
-    - cd /workspace/backend && pip install -r requirements.txt
+    - cd /workspace/frontend && git fetch
+    - cd /workspace/backend && git fetch
 
 claude_config:
   credentials_source: host_mount

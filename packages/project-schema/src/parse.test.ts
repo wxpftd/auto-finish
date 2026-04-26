@@ -15,7 +15,7 @@ repos:
     git_url: https://github.com/example/frontend.git
     working_dir: /workspace/frontend
 sandbox_config:
-  provider: daytona
+  provider: opensandbox
 claude_config:
   credentials_source: host_mount
 `;
@@ -57,7 +57,11 @@ describe('parseProjectYaml', () => {
     const dirs = project.repos.map((r) => r.working_dir);
     expect(new Set(dirs).size).toBe(dirs.length);
 
-    expect(project.sandbox_config.provider).toBe('daytona');
+    expect(project.sandbox_config.provider).toBe('opensandbox');
+    expect(project.sandbox_config.warm_strategy).toBe('baked_image');
+    expect(project.sandbox_config.warm_image).toBe(
+      'ghcr.io/example-org/example-app:warm',
+    );
     expect(project.claude_config.credentials_source).toBe('host_mount');
 
     // allowed_tools narrowed to the patterns the spec calls for.
@@ -85,7 +89,7 @@ repos:
     git_url: not-a-url
     working_dir: /workspace/frontend
 sandbox_config:
-  provider: daytona
+  provider: opensandbox
 claude_config:
   credentials_source: host_mount
 `;
@@ -101,6 +105,11 @@ claude_config:
     expect(msg).toContain('repos.0.git_url');
   });
 
+  it('warm_volume_backend defaults to "host" when YAML omits it', () => {
+    const project = parseProjectYaml(minimalYaml);
+    expect(project.sandbox_config.warm_volume_backend).toBe('host');
+  });
+
   it('reports duplicate repo name from the parsed YAML', () => {
     const yaml = `
 id: example-app
@@ -113,7 +122,7 @@ repos:
     git_url: https://github.com/example/b.git
     working_dir: /workspace/b
 sandbox_config:
-  provider: daytona
+  provider: opensandbox
 claude_config:
   credentials_source: host_mount
 `;

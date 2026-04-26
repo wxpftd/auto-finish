@@ -1,0 +1,37 @@
+# OpenSandbox sandbox-server local config.
+#
+# Mounted into the `opensandbox-server` container at
+# /etc/opensandbox/config.toml (see docker-compose.yml). The container also
+# sets SANDBOX_CONFIG_PATH to point here. All keys mirror upstream
+# `server/configuration.md`; defaults shown match upstream where omitted.
+#
+# This file is intentionally permissive (no api_key, INSECURE mode) — it is
+# only for local dev / integration tests on a developer machine. For
+# production set `[server].api_key` and pass it via OPEN-SANDBOX-API-KEY.
+
+[server]
+host = "0.0.0.0"
+port = 8080
+# api_key omitted → INSECURE mode; container also sets
+# OPENSANDBOX_INSECURE_SERVER=YES so startup doesn't prompt for confirmation.
+
+[log]
+level = "INFO"
+
+[runtime]
+type = "docker"
+# execd is the per-sandbox sidecar that bootstraps command/file APIs inside
+# each sandbox container. Pinned to the version recommended by upstream's
+# docker-compose.example.yaml.
+execd_image = "opensandbox/execd:v1.0.13"
+
+[docker]
+# Server runs in a container; sandbox containers must be reachable from the
+# SDK on the host. `bridge` + `host_ip = host.docker.internal` rewrites
+# bridge endpoint URLs to a host-reachable address (per upstream guidance
+# in server/configuration.md and docker-compose.example.yaml).
+network_mode = "bridge"
+host_ip = "host.docker.internal"
+drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
+no_new_privileges = true
+pids_limit = 4096

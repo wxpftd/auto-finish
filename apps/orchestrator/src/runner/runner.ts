@@ -49,6 +49,11 @@ import { runClaudeStage } from '../claude/spawn.js';
 import { injectClaudeCredentials } from '../claude/credentials.js';
 import { cloneRepos, writeManifest, detectChanges } from '../multi-repo/index.js';
 import { publishPullRequests } from '../pr/index.js';
+import {
+  detectDepInstallFailure,
+  snapshotArtifacts,
+  restoreArtifacts,
+} from './warm-fallback.js';
 import type {
   RunnerDeps,
   RunResult,
@@ -61,6 +66,7 @@ import type {
 import type {
   SandboxProvider,
   SandboxSession,
+  VolumeBackend,
 } from '../sandbox/interface.js';
 import type { RepoSpec } from '../multi-repo/index.js';
 import type { StageAgentConfig } from '@auto-finish/pipeline-schema';
@@ -101,6 +107,156 @@ const defaultBootstrap: BootstrapEnvFn = async (args) => {
   });
   return report;
 };
+
+/**
+ * Translate the project-schema `warm_volume_backend` selector into the
+ * lower-level `VolumeBackend` discriminated union consumed by
+ * `SandboxProvider.create()` (OSEP-0003 mapping).
+ *
+ *   - 'host'  → { kind: 'host' }
+ *               OpenSandbox treats this as the docker named volume / host
+ *               bind path; `name` on the VolumeBinding addresses it.
+ *   - 'pvc'   → { kind: 'pvc', claimName: warm_volume_claim }
+ *               K8s PersistentVolumeClaim; claimName is reused from
+ *               warm_volume_claim per Phase 1.6 decision 3.
+ *   - 'ossfs' → throws "not yet implemented" — surface the gap early at the
+ *               translation layer instead of letting it leak into a runtime
+ *               SDK error inside the provider.
+ *
+ * Only OpenSandboxProvider reads `VolumeBinding.backend`; other providers
+ * ignore the entire `volumes` field, so widening this is non-breaking.
+ */
+function buildVolumeBackend(
+  cfg: import('@auto-finish/project-schema').SandboxConfig,
+): VolumeBackend {
+  switch (cfg.warm_volume_backend) {
+    case 'host':
+      return { kind: 'host' };
+    case 'pvc':
+      // Schema enforces warm_volume_claim presence when warm_strategy is
+      // shared_volume; cast is safe here (we're inside the shared_volume
+      // branch).
+      return { kind: 'pvc', claimName: cfg.warm_volume_claim as string };
+    case 'ossfs':
+      throw new Error(
+        'ossfs warm_volume_backend not yet implemented (Phase 1.6). ' +
+          'Use "host" or "pvc".',
+      );
+    default: {
+      // Exhaustiveness guard: if the schema enum is widened, TS forces us
+      // to handle the new case here.
+      const _exhaustive: never = cfg.warm_volume_backend;
+      throw new Error(`unknown warm_volume_backend: ${String(_exhaustive)}`);
+    }
+  }
+}
+
+/**
+ * Translate a project-schema `sandbox_config` into the lower-level
+ * `SandboxConfig` consumed by `SandboxProvider.create()`. Materializes the
+ * `warm_strategy`:
+ *
+ *   - `baked_image`   — boot the warm image directly (code + deps already
+ *                        baked in). The cold-restart path (Phase E) will
+ *                        recreate from `base_image` when triggered.
+ *   - `shared_volume` — boot a generic image and mount the warm deps cache
+ *                        as a `VolumeBinding`. The `warm_volume_backend`
+ *                        selector decides whether the volume comes from the
+ *                        host (docker named volume), a K8s PVC, or OSS
+ *                        (latter throws — Phase 1.6 doesn't ship ossfs).
+ *   - `cold_only`     — pass through whatever `image` was set; let the
+ *                        provider use its default if unset.
+ */
+export function buildSandboxCreateConfig(
+  cfg: import('@auto-finish/project-schema').SandboxConfig,
+): import('../sandbox/interface.js').SandboxConfig {
+  const base: import('../sandbox/interface.js').SandboxConfig = {
+    ...(cfg.env !== undefined ? { env: cfg.env } : {}),
+    ...(cfg.setup_commands !== undefined
+      ? { setup_commands: cfg.setup_commands }
+      : {}),
+  };
+  switch (cfg.warm_strategy) {
+    case 'baked_image':
+      // Schema enforces warm_image presence when strategy=baked_image.
+      return { ...base, image: cfg.warm_image };
+    case 'shared_volume': {
+      // Schema enforces warm_volume_claim + warm_mount_path presence.
+      const backend = buildVolumeBackend(cfg);
+      return {
+        ...base,
+        ...(cfg.image !== undefined ? { image: cfg.image } : {}),
+        volumes: [
+          {
+            name: cfg.warm_volume_claim as string,
+            mountPath: cfg.warm_mount_path as string,
+            readOnly: true,
+            backend,
+          },
+        ],
+      };
+    }
+    case 'cold_only':
+    default:
+      return {
+        ...base,
+        ...(cfg.image !== undefined ? { image: cfg.image } : {}),
+      };
+  }
+}
+
+/**
+ * Variant of `buildSandboxCreateConfig` used for the Tier 2 cold-restart
+ * fallback: boot a sandbox WITHOUT the warm path so the agent can install
+ * deps freely.
+ *
+ *   - `baked_image`   — boot from `base_image` (runtime only, no deps)
+ *                        instead of `warm_image`. Drop any volumes — the
+ *                        warm volume is what we're escaping.
+ *   - `shared_volume` — keep `image`, drop `volumes` so the agent can
+ *                        write to its own `node_modules` etc.
+ *   - `cold_only`     — already cold; pass through as-is. The cold-restart
+ *                        is effectively a no-op rebuild here, kept for
+ *                        symmetry / so dep-failure detection still leads
+ *                        to a fresh sandbox.
+ *
+ * Throws if `warm_strategy === 'baked_image'` but no `base_image` was
+ * configured — the project explicitly opted into the warm path; missing
+ * `base_image` is a config bug.
+ */
+export function buildColdSandboxConfig(
+  cfg: import('@auto-finish/project-schema').SandboxConfig,
+): import('../sandbox/interface.js').SandboxConfig {
+  const base: import('../sandbox/interface.js').SandboxConfig = {
+    ...(cfg.env !== undefined ? { env: cfg.env } : {}),
+    ...(cfg.setup_commands !== undefined
+      ? { setup_commands: cfg.setup_commands }
+      : {}),
+  };
+  switch (cfg.warm_strategy) {
+    case 'baked_image':
+      if (cfg.base_image === undefined) {
+        throw new Error(
+          'cold-restart requires sandbox_config.base_image when ' +
+            'warm_strategy="baked_image"; see decision 4',
+        );
+      }
+      return { ...base, image: cfg.base_image };
+    case 'shared_volume':
+      return {
+        ...base,
+        ...(cfg.image !== undefined ? { image: cfg.image } : {}),
+        // Volumes intentionally dropped — the cold-restart's whole point is
+        // to escape the read-only / shared deps mount.
+      };
+    case 'cold_only':
+    default:
+      return {
+        ...base,
+        ...(cfg.image !== undefined ? { image: cfg.image } : {}),
+      };
+  }
+}
 
 interface PublishEventArgs {
   bus: RunnerDeps['bus'];
@@ -378,11 +534,9 @@ export async function runRequirement(
 
   try {
     provider = deps.makeSandboxProvider(project.sandbox_config_json);
-    session = await provider.create({
-      env: project.sandbox_config_json.env,
-      image: project.sandbox_config_json.image,
-      setup_commands: project.sandbox_config_json.setup_commands,
-    });
+    session = await provider.create(
+      buildSandboxCreateConfig(project.sandbox_config_json),
+    );
 
     const run = pipeline_runs.createRun(db, {
       requirement_id: requirement.id,
@@ -421,7 +575,17 @@ export async function runRequirement(
     }
 
     // 4. Run each stage -------------------------------------------------------
-    for (const stage of plan.stages) {
+    //
+    // Stage iteration is index-based (not `for-of`) so the Tier 2
+    // cold-restart fallback can re-execute the same stage by simply NOT
+    // advancing the index. `restartedStages` enforces the "only once per
+    // stage per run" guarantee — a second dep-install failure on the
+    // same stage falls through to the original `on_failure` policy, no
+    // infinite loop.
+    const restartedStages = new Set<string>();
+    let stageIdx = 0;
+    while (stageIdx < plan.stages.length) {
+      const stage = plan.stages[stageIdx]!;
       // Persist a row up front so events can be appended.
       const stageExec = stage_executions.createStageExecution(db, {
         run_id: run.id,
@@ -479,6 +643,123 @@ export async function runRequirement(
       const durationMs = Date.now() - stageStart;
 
       if (outcome.status === 'failed') {
+        // Tier 2 cold-restart fallback (decision 4) ------------------------
+        //
+        // Decide BEFORE finalizing the stage row: if we're going to
+        // cold-restart, the row stays open (status=running) and we append a
+        // `cold_restart` synthetic event to its events_json so the audit
+        // trail captures the boundary inside the same row. Otherwise we
+        // finalize as failed and proceed with the original on_failure.
+        //
+        // We re-read events from the DB (rather than threading them out of
+        // runOneStage) so the path is identical to a future crash-resume
+        // read. The persisted shape is `StageEvent`, which is what
+        // `detectDepInstallFailure` consumes natively.
+        const stageRow = stage_executions.getStageExecution(db, stageExec.id);
+        const persistedEvents = stageRow?.events_json ?? [];
+        const explicitColdRestart = stage.on_failure === 'cold_restart';
+        const detectedDepFailure = detectDepInstallFailure(persistedEvents);
+        const alreadyRestarted = restartedStages.has(stage.name);
+        const shouldColdRestart =
+          (explicitColdRestart || detectedDepFailure) && !alreadyRestarted;
+
+        if (shouldColdRestart) {
+          // Mark this stage as restarted so a second failure of the same
+          // stage falls through to the original `on_failure` policy.
+          restartedStages.add(stage.name);
+
+          // Annotate the failing stage row with a synthetic cold_restart
+          // boundary event, then finalize it as `failed`. The retry runs
+          // in a NEW stage_executions row (created at the top of the next
+          // loop iteration), so the audit trail captures both attempts:
+          // one row for the failed attempt with a `cold_restart` boundary
+          // marker, and a fresh row for the retry. Leaving the original
+          // row as `running` would orphan it forever (no `finished_at`,
+          // breaks any "latest pending stage" query).
+          stage_executions.appendEvent(
+            db,
+            stageExec.id,
+            asStageEvent('cold_restart', {
+              reason: detectedDepFailure
+                ? 'dep-install signature detected in stage events'
+                : `stage on_failure=cold_restart triggered by: ${
+                    outcome.error ?? 'unknown error'
+                  }`,
+            }),
+          );
+          stage_executions.finishStageExecution(db, stageExec.id, {
+            status: 'failed',
+          });
+
+          // Surface to consumers. Reducer treats this as a no-op so run
+          // status stays `running`.
+          publishEvent({
+            bus,
+            run_id: run.id,
+            event: {
+              kind: 'cold_restart',
+              run_id: run.id,
+              stage_name: stage.name,
+              at: new Date().toISOString(),
+              reason: detectedDepFailure
+                ? 'dep-install failure detected'
+                : 'on_failure=cold_restart',
+            },
+          });
+
+          // Snapshot prior-stage artifacts BEFORE destroying the session.
+          // Failures here are best-effort: we'd rather restart with an
+          // empty artifacts/ tree than abort the run.
+          let snapshot: Awaited<
+            ReturnType<typeof snapshotArtifacts>
+          > = [];
+          try {
+            snapshot = await snapshotArtifacts(session);
+          } catch {
+            snapshot = [];
+          }
+
+          // Destroy the failed session and recreate cold from base_image.
+          await session.destroy();
+          // `provider` is non-null in this branch (we set it above), but
+          // narrow for TS.
+          if (provider === null) {
+            throw new Error('runner: provider lost before cold-restart');
+          }
+          session = await provider.create(
+            buildColdSandboxConfig(project.sandbox_config_json),
+          );
+
+          // Re-inject credentials and re-bootstrap (re-clone repos onto
+          // the per-Requirement branch). Restore artifacts last so a
+          // subsequent re-run of the same stage sees prior outputs at the
+          // expected paths.
+          await inject(session);
+          const reBoot = await bootstrap({
+            session,
+            repos: repoSpecs,
+            branchName,
+            requirementId: requirement.id,
+          });
+          if (reBoot.failed.length > 0) {
+            throw new Error(
+              `runner: re-bootstrap after cold-restart failed: ${reBoot.failed
+                .map((f) => `${f.repo_id}: ${f.error}`)
+                .join('; ')}`,
+            );
+          }
+          await restoreArtifacts(session, snapshot);
+
+          // Re-execute the SAME stage by NOT advancing the index. The next
+          // loop iteration creates a fresh stage_executions row for the
+          // retry; the original row stays in place finalized as `failed`
+          // with a `cold_restart` boundary event in events_json — the
+          // audit trail captures both attempts cleanly.
+          continue;
+        }
+
+        // No cold-restart — finalize as failed and apply original
+        // on_failure policy.
         stage_executions.finishStageExecution(db, stageExec.id, {
           status: 'failed',
         });
@@ -494,7 +775,10 @@ export async function runRequirement(
           },
         });
 
-        if (stage.on_failure === 'pause') {
+        if (stage.on_failure === 'pause' || stage.on_failure === 'cold_restart') {
+          // `cold_restart` reaches here only on the SECOND failure of the
+          // same stage (already-restarted guard). Treat it as `pause` so
+          // an operator can intervene rather than looping forever.
           requirementsRepo.updateRequirementStatus(
             db,
             requirement.id,
@@ -629,6 +913,10 @@ export async function runRequirement(
           },
         });
       }
+
+      // Advance to the next stage. The cold-restart `continue` above
+      // intentionally skips this so the same stage runs again.
+      stageIdx += 1;
     }
 
     // 5. Detect diffs + open PRs ---------------------------------------------

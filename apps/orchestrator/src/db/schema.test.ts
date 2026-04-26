@@ -59,10 +59,12 @@ describe('schema migrations', () => {
 describe('json column round-trip', () => {
   it('round-trips nested project sandbox/claude configs', () => {
     const sandbox: SandboxConfig = {
-      daytona_endpoint: 'http://localhost:3986',
+      provider: 'opensandbox',
+      endpoint: 'http://localhost:8080',
       image: 'node:20',
       env: { NODE_ENV: 'production', FOO: 'bar' },
       setup_commands: ['pnpm install', 'pnpm build'],
+      warm_strategy: 'cold_only',
     };
     const claude: ClaudeConfig = {
       credentials_source: 'host_mount',

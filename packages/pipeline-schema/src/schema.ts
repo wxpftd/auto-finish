@@ -79,7 +79,31 @@ export const StageAgentConfigSchema = z
 
 export type StageAgentConfig = z.infer<typeof StageAgentConfigSchema>;
 
-export const OnFailureSchema = z.enum(['retry', 'pause', 'abort']);
+/**
+ * Per-stage failure policy.
+ *
+ *   - `retry`         — re-run the stage once (not yet implemented; treated
+ *                        like `abort` until the retry path lands).
+ *   - `pause`         — mark the run paused so an operator can intervene.
+ *                        Default — safe for stages where rerunning is cheap
+ *                        but human review is the right next step.
+ *   - `abort`         — fail the run outright. Use for stages where any
+ *                        failure is structural (e.g. config invalid).
+ *   - `cold_restart`  — destroy the sandbox, recreate from
+ *                        `sandbox_config.base_image` (instead of warm_image),
+ *                        restore prior-stage artifacts, and retry from this
+ *                        stage. Used as the explicit opt-in trigger for the
+ *                        Tier 2 cold-restart fallback. The runner ALSO triggers
+ *                        cold-restart automatically when it detects a
+ *                        dep-install signature in the stage events, regardless
+ *                        of `on_failure`. See decision 4 in the plan.
+ */
+export const OnFailureSchema = z.enum([
+  'retry',
+  'pause',
+  'abort',
+  'cold_restart',
+]);
 export type OnFailure = z.infer<typeof OnFailureSchema>;
 
 /**

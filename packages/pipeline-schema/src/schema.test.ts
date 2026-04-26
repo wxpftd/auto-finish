@@ -80,6 +80,16 @@ describe('PipelineSchema', () => {
     expect(issue).toBeDefined();
   });
 
+  it('accepts cold_restart as a valid on_failure (Tier 2 opt-in)', () => {
+    const result = StageSchema.safeParse({
+      ...baseStage,
+      on_failure: 'cold_restart',
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.on_failure).toBe('cold_restart');
+  });
+
   it('applies artifact.required default of true', () => {
     const result = StageSchema.safeParse({
       ...baseStage,

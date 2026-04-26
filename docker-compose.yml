@@ -11,8 +11,9 @@
 #     colima, podman-compose >= 1.0.6).
 #   - 4 GB free RAM (Langfuse v3 alone needs ~1.5 GB: clickhouse + minio +
 #     postgres + redis + 2 langfuse processes).
-#   - Free TCP ports: 5432, 6379, 3001, 9000, 9090, 8123, 3986 by default
-#     (override any of them through .env).
+#   - Free TCP ports: 5432, 6379, 3001, 9000, 9090, 8123, 8080 by default
+#     (override any of them through .env). 8080 is the OpenSandbox
+#     sandbox-server (production default backend).
 #
 # Bring up:
 #   cp .env.example .env             # then edit secrets
@@ -33,17 +34,19 @@
 #   The orchestrator only uses --print, so this is fine — just don't try to
 #   manually `claude` interactively against this stack and expect traces.
 #
-# Daytona note:
-#   Daytona OSS does NOT publish a single-image local server. Their official
-#   path is a 10+ service docker-compose at
-#   https://github.com/daytonaio/daytona/tree/main/docker — too heavy to
-#   embed. We run an nginx stub on DAYTONA_PORT (default 3986, matching their
-#   api server default) that serves a clear "install separately" page. To get
-#   real Daytona locally:
-#     git clone https://github.com/daytonaio/daytona
-#     cd daytona/docker && docker compose up -d
-#   Then set DAYTONA_API_URL=http://localhost:3986 in .env and stop the stub
-#   (`docker compose stop daytona-stub`).
+# OpenSandbox note (production default backend):
+#   OpenSandbox is the project's default sandbox backend (decision 2 in the
+#   plan). The `opensandbox-server` service below brings up the FastAPI
+#   sandbox-server on port 8080 backed by the local Docker socket. The
+#   orchestrator points at this via SANDBOX_ENDPOINT (default
+#   http://localhost:8080).
+#
+#   The image tag is overridable via OPENSANDBOX_IMAGE so you can pin a
+#   specific release or swap in a fork. If the upstream image isn't
+#   available offline, the service won't pull — set OPENSANDBOX_IMAGE to a
+#   locally-built tag, or stop this service and switch the project's
+#   sandbox provider to `in_memory` for tests that don't need a real
+#   sandbox.
 #
 # Langfuse note:
 #   Langfuse v3 (current major as of April 2026) requires postgres + clickhouse
@@ -270,23 +273,39 @@ services:
       - auto-finish-net
 
   # ---------------------------------------------------------------------------
-  # Daytona stub — see the top-of-file note. Real Daytona OSS is a separate
-  # multi-service compose; this nginx serves a clear landing page so devs see
-  # exactly how to get the real thing running.
+  # OpenSandbox sandbox-server — production-default sandbox backend (decision
+  # 2 in the plan). Provides the FastAPI HTTP surface our `OpenSandboxProvider`
+  # speaks to (Phase B); orchestrates Docker containers as the runtime. The
+  # service mounts the host's Docker socket so it can `docker run` worker
+  # containers directly.
+  #
+  # Override OPENSANDBOX_IMAGE in .env to pin a specific release or swap in a
+  # fork. If the image isn't available, `docker compose up` will fail to
+  # pull — that's fine, just stop this service; tests that don't need a real
+  # sandbox can use the in-memory provider until the image is reachable.
   # ---------------------------------------------------------------------------
-  daytona-stub:
-    image: nginx:alpine
-    container_name: auto-finish-daytona-stub
+  opensandbox-server:
+    image: ${OPENSANDBOX_IMAGE:-opensandbox/server:latest}
+    container_name: auto-finish-opensandbox-server
     restart: unless-stopped
     ports:
-      - "${DAYTONA_PORT:-3986}:80"
+      - "${OPENSANDBOX_PORT:-8080}:8080"
+    environment:
+      # Required when [server].api_key is unset and the process runs
+      # non-interactively (no TTY to type "YES" on startup).
+      OPENSANDBOX_INSECURE_SERVER: "YES"
+      # Override the default ~/.sandbox.toml lookup so the container reads
+      # the bind-mounted config below.
+      SANDBOX_CONFIG_PATH: /etc/opensandbox/config.toml
     volumes:
-      - ./compose/daytona-stub/index.html:/usr/share/nginx/html/index.html:ro
-      - ./compose/daytona-stub/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./compose/opensandbox/config.toml:/etc/opensandbox/config.toml:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:80/ || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 5
+      start_period: 15s
     networks:
       - auto-finish-net
+

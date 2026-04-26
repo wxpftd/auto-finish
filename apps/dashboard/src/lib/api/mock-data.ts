@@ -79,7 +79,11 @@ export const mockProjects: Project[] = [
     name: 'Web Stack',
     description: 'Frontend (SvelteKit) + Backend (Hono) reference project.',
     default_pipeline_id: mockPipeline.id,
-    sandbox_config_json: { image: 'auto-finish/base:latest' },
+    sandbox_config_json: {
+      provider: 'opensandbox',
+      image: 'auto-finish/base:latest',
+      warm_strategy: 'cold_only',
+    },
     claude_config_json: { credentials_source: 'host_mount' },
     created_at: now - 86_400_000 * 7,
     updated_at: now - 86_400_000,

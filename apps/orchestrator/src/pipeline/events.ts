@@ -92,6 +92,26 @@ export interface RunPausedEvent {
   reason: string;
 }
 
+/**
+ * The Tier 2 cold-restart fallback fired for a stage: the runner has
+ * destroyed the warm sandbox, recreated a cold one from `base_image`,
+ * restored prior-stage artifacts, and is about to retry the stage.
+ *
+ * Status reducer treats this as a no-op — the run remains `running` on
+ * the same stage. Dashboards surface the event so operators can see that
+ * a run took the slow path.
+ *
+ * See decision 4 in the plan and `runner/warm-fallback.ts`.
+ */
+export interface ColdRestartEvent {
+  kind: 'cold_restart';
+  run_id: string;
+  stage_name: string;
+  at: string;
+  /** Human-readable description of why the cold-restart fired. */
+  reason: string;
+}
+
 /** Discriminated union of every pipeline event. */
 export type PipelineEvent =
   | RunStartedEvent
@@ -103,7 +123,8 @@ export type PipelineEvent =
   | GateDecidedEvent
   | RunCompletedEvent
   | RunFailedEvent
-  | RunPausedEvent;
+  | RunPausedEvent
+  | ColdRestartEvent;
 
 /** Convenience: every kind string in the union. */
 export type PipelineEventKind = PipelineEvent['kind'];

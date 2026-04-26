@@ -17,7 +17,7 @@ const baseProject = {
   name: 'Example App',
   repos: [baseRepo],
   sandbox_config: {
-    provider: 'daytona',
+    provider: 'opensandbox',
   },
   claude_config: {
     credentials_source: 'host_mount',
@@ -133,6 +133,66 @@ describe('ProjectConfigSchema', () => {
       surprise: 'field',
     });
     expect(result.success).toBe(false);
+  });
+
+  it('warm_volume_backend defaults to "host" when unset (Phase 1.6 backwards-compat)', () => {
+    const result = ProjectConfigSchema.safeParse(baseProject);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.sandbox_config.warm_volume_backend).toBe('host');
+  });
+
+  it('warm_volume_backend accepts "pvc"', () => {
+    const result = ProjectConfigSchema.safeParse({
+      ...baseProject,
+      sandbox_config: {
+        provider: 'opensandbox',
+        warm_strategy: 'shared_volume',
+        warm_volume_claim: 'proj-deps',
+        warm_mount_path: '/workspace/.deps',
+        warm_volume_backend: 'pvc',
+      },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.sandbox_config.warm_volume_backend).toBe('pvc');
+  });
+
+  it('warm_volume_backend accepts "ossfs" (schema-level; provider-level not yet impl)', () => {
+    const result = ProjectConfigSchema.safeParse({
+      ...baseProject,
+      sandbox_config: {
+        provider: 'opensandbox',
+        warm_strategy: 'shared_volume',
+        warm_volume_claim: 'proj-deps',
+        warm_mount_path: '/workspace/.deps',
+        warm_volume_backend: 'ossfs',
+      },
+    });
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data.sandbox_config.warm_volume_backend).toBe('ossfs');
+  });
+
+  it('rejects unknown warm_volume_backend value with helpful enum message', () => {
+    const result = ProjectConfigSchema.safeParse({
+      ...baseProject,
+      sandbox_config: {
+        provider: 'opensandbox',
+        warm_strategy: 'shared_volume',
+        warm_volume_claim: 'proj-deps',
+        warm_mount_path: '/workspace/.deps',
+        warm_volume_backend: 'docker',
+      },
+    });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find((i) =>
+      i.path.join('.') === 'sandbox_config.warm_volume_backend',
+    );
+    expect(issue).toBeDefined();
+    // zod's enum error contains the union of valid options.
+    expect(issue!.message).toMatch(/host|pvc|ossfs/);
   });
 });
 

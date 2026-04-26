@@ -1,5 +1,6 @@
 export {
   SandboxProviderSchema,
+  WarmStrategySchema,
   SandboxConfigSchema,
   CredentialsSourceSchema,
   McpServerConfigSchema,
@@ -11,6 +12,7 @@ export {
 
 export type {
   SandboxProviderKind,
+  WarmStrategy,
   SandboxConfig,
   CredentialsSource,
   McpServerConfig,

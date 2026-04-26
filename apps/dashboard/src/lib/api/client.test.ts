@@ -40,7 +40,10 @@ describe('HttpApi.listProjects', () => {
         name: 'demo',
         description: null,
         default_pipeline_id: null,
-        sandbox_config_json: {},
+        sandbox_config_json: {
+          provider: 'opensandbox',
+          warm_strategy: 'cold_only',
+        },
         claude_config_json: { credentials_source: 'host_mount' },
         created_at: 1,
         updated_at: 2,

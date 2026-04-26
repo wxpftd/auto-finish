@@ -37,17 +37,21 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 import type { Pipeline } from '@auto-finish/pipeline-schema';
+import type { SandboxConfig as ProjectSandboxConfig } from '@auto-finish/project-schema';
 
 // ---------------------------------------------------------------------------
 // JSON column types
 // ---------------------------------------------------------------------------
 
-export interface SandboxConfig {
-  daytona_endpoint?: string;
-  image?: string;
-  env?: Record<string, string>;
-  setup_commands?: string[];
-}
+/**
+ * Stored shape of `projects.sandbox_config_json`.
+ *
+ * Aliased to the project-schema's `SandboxConfig` so the YAML form, the DB
+ * row, and the runner all agree. Defaults for `provider` / `warm_strategy`
+ * are applied at parse time by `parseProjectYaml` — by the time we reach
+ * this type, both fields are populated.
+ */
+export type SandboxConfig = ProjectSandboxConfig;
 
 export interface ClaudeConfig {
   credentials_source: 'host_mount' | 'secret_manager';

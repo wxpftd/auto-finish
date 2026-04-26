@@ -165,5 +165,13 @@ export function reduceRunStatus(
     case 'run_failed': {
       return { kind: 'failed', error: event.error };
     }
+
+    case 'cold_restart': {
+      // Tier 2 cold-restart fallback fired. The runner is about to re-run
+      // the same stage in a fresh sandbox. Run status doesn't change —
+      // we stay in `running` (or whatever the prior state was; the runner
+      // does not transition the run before emitting this event).
+      return current;
+    }
   }
 }

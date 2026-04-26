@@ -49,10 +49,16 @@ export type { ProjectConfig, RepoConfig, SandboxConfig, ClaudeConfig };
 
 /** JSON column shape on `projects.sandbox_config_json`. */
 export interface SandboxConfigJson {
-  daytona_endpoint?: string;
+  provider: 'opensandbox' | 'in_memory';
+  endpoint?: string;
   image?: string;
   env?: Record<string, string>;
   setup_commands?: string[];
+  warm_strategy: 'baked_image' | 'shared_volume' | 'cold_only';
+  warm_image?: string;
+  base_image?: string;
+  warm_volume_claim?: string;
+  warm_mount_path?: string;
 }
 
 /** JSON column shape on `projects.claude_config_json`. */
@@ -324,6 +330,19 @@ export interface RunPausedEvent {
   reason: string;
 }
 
+/**
+ * Tier 2 cold-restart fallback fired for a stage: the orchestrator
+ * destroyed the warm sandbox, recreated from `base_image`, and is about
+ * to retry the same stage. Display-only — does not change run status.
+ */
+export interface ColdRestartEvent {
+  kind: 'cold_restart';
+  run_id: string;
+  stage_name: string;
+  at: string;
+  reason: string;
+}
+
 export type PipelineEvent =
   | RunStartedEvent
   | StageStartedEvent
@@ -334,7 +353,8 @@ export type PipelineEvent =
   | GateDecidedEvent
   | RunCompletedEvent
   | RunFailedEvent
-  | RunPausedEvent;
+  | RunPausedEvent
+  | ColdRestartEvent;
 
 export type PipelineEventKind = PipelineEvent['kind'];
 

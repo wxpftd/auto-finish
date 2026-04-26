@@ -1,10 +1,51 @@
 /**
  * SandboxProvider interface — the abstraction every sandbox backend
- * (Daytona local, Daytona cloud, Microsandbox, the in-memory test reference)
- * must satisfy.
+ * (OpenSandbox in production, the in-memory test reference) must satisfy.
  *
  * Pure type definitions only. No runtime code.
  */
+
+/**
+ * Volume backend selector. Maps onto OpenSandbox OSEP-0003's three supported
+ * volume sources:
+ *   - `host`   — local Docker named volume / bind-mount path on the host;
+ *                an explicit absolute `path` may be provided. When unset,
+ *                `OpenSandboxProvider` falls back to `VolumeBinding.mountPath`
+ *                (the bind-mount-equals-mount-path convention).
+ *   - `pvc`    — Kubernetes PersistentVolumeClaim (claimName-addressed)
+ *   - `ossfs`  — Aliyun OSS bucket mounted as a filesystem
+ *
+ * `kind: 'host'` is the default when `VolumeBinding.backend` is unset.
+ * The in-memory provider doesn't speak OSEP-0003 and silently ignores the
+ * entire `volumes` field, so widening this discriminated union is
+ * non-breaking — only OpenSandboxProvider reads `backend`.
+ */
+export type VolumeBackend =
+  | { kind: 'host'; path?: string }
+  | { kind: 'pvc'; claimName: string }
+  | { kind: 'ossfs'; bucket: string; endpoint?: string };
+
+/**
+ * One named volume / persistent claim mounted into a sandbox at create time.
+ * Maps directly onto OpenSandbox's `volumes[]` field; the in-memory
+ * provider ignores it (no persistent-volume support).
+ */
+export interface VolumeBinding {
+  /** Volume identifier — Docker named volume or K8s PVC `claimName`. */
+  name: string;
+  /** Absolute path inside the sandbox where the volume mounts. */
+  mountPath: string;
+  /** Mount read-only. Default: false. */
+  readOnly?: boolean;
+  /** Optional sub-path inside the volume to mount instead of root. */
+  subPath?: string;
+  /**
+   * Backend selector (OpenSandbox OSEP-0003). Defaults to `{ kind: 'host' }`
+   * when unset. Only OpenSandboxProvider consumes this — other providers
+   * ignore the entire `volumes` field.
+   */
+  backend?: VolumeBackend;
+}
 
 /** Configuration for creating a new sandbox. */
 export interface SandboxConfig {
@@ -16,6 +57,12 @@ export interface SandboxConfig {
   setup_commands?: string[];
   /** Default working directory for `run()` and `startStream()`. */
   working_dir?: string;
+  /**
+   * Persistent volumes to attach. Used by warm-workspace strategies
+   * (`shared_volume`) to mount a deps cache. Providers that don't support
+   * volumes should ignore this field rather than throwing.
+   */
+  volumes?: VolumeBinding[];
 }
 
 /** Per-call options for `run()` / `startStream()`. */

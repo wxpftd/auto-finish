@@ -8,6 +8,7 @@
     RequirementStatus,
     StageExecution,
   } from '$lib/api/types';
+  import { reduceEvent, type LogEntry } from '$lib/api/event-reducer';
   import type { PageData } from './$types';
 
   let { data }: { data: PageData } = $props();
@@ -18,7 +19,7 @@
   let liveStatus = $state<RequirementStatus | string>('queued');
   let currentStage = $state<string | null>(null);
 
-  let log = $state<{ at: number; line: string }[]>([]);
+  let log = $state<LogEntry[]>([]);
   let liveConnected = $state(false);
   let liveError = $state<string | null>(null);
 
@@ -55,71 +56,12 @@
     skipped: 'text-slate-400',
   };
 
-  function patchStage(stage_name: string, patch: Partial<StageExecution>): void {
-    stages = stages.map((s) =>
-      s.stage_name === stage_name ? { ...s, ...patch } : s,
-    );
-  }
-
-  function appendLog(line: string): void {
-    log = [...log.slice(-99), { at: Date.now(), line }];
-  }
-
   function applyEvent(ev: PipelineEvent): void {
-    switch (ev.kind) {
-      case 'run_started':
-        appendLog(`run started`);
-        liveStatus = 'running';
-        break;
-      case 'stage_started':
-        appendLog(`stage started: ${ev.stage_name}`);
-        currentStage = ev.stage_name;
-        liveStatus = 'running';
-        patchStage(ev.stage_name, { status: 'running', started_at: Date.parse(ev.at) });
-        break;
-      case 'stage_completed':
-        appendLog(`stage completed: ${ev.stage_name} (${ev.duration_ms}ms)`);
-        patchStage(ev.stage_name, {
-          status: 'succeeded',
-          finished_at: Date.parse(ev.at),
-        });
-        break;
-      case 'stage_failed':
-        appendLog(`stage failed: ${ev.stage_name} — ${ev.error}`);
-        patchStage(ev.stage_name, {
-          status: 'failed',
-          finished_at: Date.parse(ev.at),
-        });
-        liveStatus = 'failed';
-        break;
-      case 'stage_artifact_produced':
-        appendLog(`artifact: ${ev.artifact_path}`);
-        break;
-      case 'gate_required':
-        appendLog(`gate required: ${ev.stage_name}`);
-        currentStage = ev.stage_name;
-        liveStatus = 'awaiting_gate';
-        patchStage(ev.stage_name, { status: 'awaiting_gate' });
-        break;
-      case 'gate_decided':
-        appendLog(`gate decided: ${ev.stage_name} → ${ev.decision}`);
-        patchStage(ev.stage_name, {
-          status: ev.decision === 'approved' ? 'gate_approved' : 'gate_rejected',
-        });
-        if (ev.decision === 'rejected') liveStatus = 'awaiting_changes';
-        break;
-      case 'run_completed':
-        appendLog(`run completed`);
-        liveStatus = 'done';
-        break;
-      case 'run_failed':
-        appendLog(`run failed: ${ev.error}`);
-        liveStatus = 'failed';
-        break;
-      case 'run_paused':
-        appendLog(`run paused: ${ev.reason}`);
-        break;
-    }
+    const next = reduceEvent({ log, liveStatus, currentStage, stages }, ev);
+    log = next.log;
+    liveStatus = next.liveStatus;
+    currentStage = next.currentStage;
+    stages = next.stages;
   }
 
   $effect(() => {
