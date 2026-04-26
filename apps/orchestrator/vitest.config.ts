@@ -4,18 +4,26 @@ import { resolve } from 'node:path';
 /**
  * Vitest config for the orchestrator.
  *
- * The `$env/dynamic/public` alias mirrors the dashboard's vitest config so
- * cross-cutting tests in `src/wire/` can import the dashboard's
- * `lib/api/ws.ts` (which depends on the SvelteKit virtual module) without
- * pulling in the SvelteKit Vite plugin. The alias only fires when something
- * imports that exact specifier — existing orchestrator tests are unaffected.
+ * Two tweaks support the cross-cutting `src/wire/realtime-e2e.test.ts`,
+ * which imports dashboard sources (`event-reducer.ts`, `ws.ts`) by relative
+ * path so the test exercises the actual dashboard code rather than a copy:
  *
- * `esbuild.tsconfigRaw` short-circuits esbuild's tsconfig discovery when it
- * transforms files that live under `apps/dashboard/`. Without this, esbuild
- * walks up from a dashboard file, finds `apps/dashboard/tsconfig.json`,
- * and tries to follow its `extends: "./.svelte-kit/tsconfig.json"` —
- * which only exists after `svelte-kit sync` has been run. Inlining a
- * minimal tsconfig means dashboard imports work even on a clean checkout.
+ *   1. `resolve.alias` for `$env/dynamic/public` mirrors the dashboard's
+ *      vitest config — `ws.ts` reads SvelteKit's virtual env module; under
+ *      plain vitest we redirect to a tiny stub the dashboard already ships.
+ *
+ *   2. `globalSetup` materializes a stub `apps/dashboard/.svelte-kit/
+ *      tsconfig.json` if it's missing. Vite's tsconfig discovery walks up
+ *      from each transformed file; for a dashboard file that lands at
+ *      `apps/dashboard/tsconfig.json`, which `extends` the svelte-kit
+ *      generated tsconfig that only exists after `svelte-kit sync`. The
+ *      stub satisfies the discovery without coupling the orchestrator
+ *      suite to svelte's CLI; the real svelte-kit sync will overwrite it
+ *      the next time the dashboard's tooling runs.
+ *
+ * The alias only fires for the `$env/...` specifier; the global setup is a
+ * no-op once the dashboard has been synced. Existing orchestrator tests are
+ * unaffected by either tweak.
  */
 export default defineConfig({
   resolve: {
@@ -30,18 +38,10 @@ export default defineConfig({
       ),
     },
   },
-  esbuild: {
-    tsconfigRaw: {
-      compilerOptions: {
-        target: 'es2022',
-        useDefineForClassFields: true,
-        verbatimModuleSyntax: true,
-      },
-    },
-  },
   test: {
     globals: false,
     include: ['src/**/*.test.ts'],
+    globalSetup: ['./test/global-setup.ts'],
     coverage: {
       reporter: ['text', 'html'],
       include: ['src/**/*.ts'],
