@@ -1,0 +1,292 @@
+# =============================================================================
+# auto-finish developer stack
+# =============================================================================
+# Purpose:
+#   Local infrastructure for the auto-finish orchestrator + dashboard. The Node
+#   apps (apps/orchestrator, apps/dashboard) run on the *host* via `pnpm dev`;
+#   this compose file only brings up the *services they depend on*.
+#
+# Prerequisites:
+#   - Docker Desktop 4.30+ (or any compose v2 compatible runtime: OrbStack,
+#     colima, podman-compose >= 1.0.6).
+#   - 4 GB free RAM (Langfuse v3 alone needs ~1.5 GB: clickhouse + minio +
+#     postgres + redis + 2 langfuse processes).
+#   - Free TCP ports: 5432, 6379, 3001, 9000, 9090, 8123, 3986 by default
+#     (override any of them through .env).
+#
+# Bring up:
+#   cp .env.example .env             # then edit secrets
+#   bash scripts/dev-up.sh           # docker compose up -d + healthcheck wait
+#
+# Seed Langfuse and capture API keys into .env:
+#   bash scripts/seed-langfuse.sh
+#
+# Point the orchestrator at this stack:
+#   The orchestrator reads .env at boot. Once seeded, it picks up
+#   LANGFUSE_HOST / LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY automatically.
+#   For Claude Code call capture, the orchestrator spawns `claude --print`
+#   subprocesses with ANTHROPIC_BASE_URL pointing at the Langfuse proxy.
+#
+# Caveat — Claude Code & ANTHROPIC_BASE_URL:
+#   Claude Code respects ANTHROPIC_BASE_URL only in `--print` (headless) mode.
+#   Interactive mode currently ignores it (see anthropics/claude-code#36998).
+#   The orchestrator only uses --print, so this is fine — just don't try to
+#   manually `claude` interactively against this stack and expect traces.
+#
+# Daytona note:
+#   Daytona OSS does NOT publish a single-image local server. Their official
+#   path is a 10+ service docker-compose at
+#   https://github.com/daytonaio/daytona/tree/main/docker — too heavy to
+#   embed. We run an nginx stub on DAYTONA_PORT (default 3986, matching their
+#   api server default) that serves a clear "install separately" page. To get
+#   real Daytona locally:
+#     git clone https://github.com/daytonaio/daytona
+#     cd daytona/docker && docker compose up -d
+#   Then set DAYTONA_API_URL=http://localhost:3986 in .env and stop the stub
+#   (`docker compose stop daytona-stub`).
+#
+# Langfuse note:
+#   Langfuse v3 (current major as of April 2026) requires postgres + clickhouse
+#   + redis + minio + 2 langfuse containers. We use a *separate* `langfuse-db`
+#   postgres so that resetting Langfuse never disturbs the orchestrator's app
+#   DB. The app `postgres` service below is for the orchestrator only.
+# =============================================================================
+
+name: auto-finish
+
+networks:
+  auto-finish-net:
+    name: auto-finish-net
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:
+  langfuse_pgdata:
+  langfuse_clickhouse_data:
+  langfuse_clickhouse_logs:
+  langfuse_minio_data:
+
+services:
+  # ---------------------------------------------------------------------------
+  # Postgres — application database for the orchestrator (Drizzle target when
+  # running in "postgres mode"; SQLite is the default for solo local dev).
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: auto-finish-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-autofinish}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-autofinish}
+      POSTGRES_DB: ${POSTGRES_DB:-autofinish}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-autofinish} -d ${POSTGRES_DB:-autofinish}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - auto-finish-net
+
+  # ---------------------------------------------------------------------------
+  # Redis — BullMQ queue backend for the orchestrator. Also reused by
+  # Langfuse (via langfuse-redis below — kept separate so resetting Langfuse
+  # doesn't drop the orchestrator's job queue).
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: auto-finish-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - auto-finish-net
+
+  # ---------------------------------------------------------------------------
+  # Langfuse v3 stack — observability for Claude Code subprocess LLM calls.
+  # Six containers below; do not split, they're a unit.
+  # ---------------------------------------------------------------------------
+
+  # Langfuse's dedicated postgres (NOT shared with the app `postgres` above).
+  langfuse-db:
+    image: postgres:16-alpine
+    container_name: auto-finish-langfuse-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${LANGFUSE_DB_USER:-langfuse}
+      POSTGRES_PASSWORD: ${LANGFUSE_DB_PASSWORD:-langfuse}
+      POSTGRES_DB: ${LANGFUSE_DB_NAME:-langfuse}
+    volumes:
+      - langfuse_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LANGFUSE_DB_USER:-langfuse} -d ${LANGFUSE_DB_NAME:-langfuse}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - auto-finish-net
+
+  # Langfuse v3 stores traces in ClickHouse, not Postgres.
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: auto-finish-langfuse-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    ports:
+      - "${LANGFUSE_CLICKHOUSE_PORT:-8123}:8123"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - auto-finish-net
+
+  # Langfuse v3 uses MinIO for trace event uploads, media, and batch exports.
+  langfuse-minio:
+    image: minio/minio:RELEASE.2024-08-26T15-33-07Z
+    container_name: auto-finish-langfuse-minio
+    restart: unless-stopped
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: ${LANGFUSE_MINIO_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+    volumes:
+      - langfuse_minio_data:/data
+    ports:
+      - "${LANGFUSE_MINIO_PORT:-9090}:9000"
+      - "${LANGFUSE_MINIO_CONSOLE_PORT:-9091}:9001"
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - auto-finish-net
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    container_name: auto-finish-langfuse-worker
+    restart: unless-stopped
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: &langfuse_env
+      DATABASE_URL: postgresql://${LANGFUSE_DB_USER:-langfuse}:${LANGFUSE_DB_PASSWORD:-langfuse}@langfuse-db:5432/${LANGFUSE_DB_NAME:-langfuse}
+      SALT: ${LANGFUSE_SALT:-please-change-this-salt-32chars-min}
+      ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000}
+      TELEMETRY_ENABLED: "true"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_USER: ${LANGFUSE_CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:-clickhouse}
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_MINIO_USER:-minio}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_MINIO_USER:-minio}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:-miniosecret}
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_AUTH: ""
+    networks:
+      - auto-finish-net
+
+  langfuse-web:
+    image: langfuse/langfuse:3
+    container_name: auto-finish-langfuse-web
+    restart: unless-stopped
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${LANGFUSE_PORT:-3001}:3000"
+    environment:
+      <<: *langfuse_env
+      # NEXTAUTH_URL must match the *externally-reachable* host:port that the
+      # browser uses, NOT the internal docker network address.
+      NEXTAUTH_URL: ${LANGFUSE_PUBLIC_URL:-http://localhost:3001}
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:-please-change-this-nextauth-secret}
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/public/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+    networks:
+      - auto-finish-net
+
+  # ---------------------------------------------------------------------------
+  # Daytona stub — see the top-of-file note. Real Daytona OSS is a separate
+  # multi-service compose; this nginx serves a clear landing page so devs see
+  # exactly how to get the real thing running.
+  # ---------------------------------------------------------------------------
+  daytona-stub:
+    image: nginx:alpine
+    container_name: auto-finish-daytona-stub
+    restart: unless-stopped
+    ports:
+      - "${DAYTONA_PORT:-3986}:80"
+    volumes:
+      - ./compose/daytona-stub/index.html:/usr/share/nginx/html/index.html:ro
+      - ./compose/daytona-stub/default.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:80/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - auto-finish-net

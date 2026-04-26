@@ -1,0 +1,111 @@
+# two-repo-demo / pipeline.yaml
+#
+# Explicit override of the bundled default pipeline
+# (../default-pipeline.yaml). 4 stages, 2 human gates, identical structure
+# to the default — except the `验证` stage runs the concrete frontend +
+# backend test commands used by this demo (`npm test` in both repos),
+# matching the per-repo `test_command` fields in ./project.yaml.
+#
+# Why override at all (instead of relying on the default)?
+#   - The default's `验证` allowed_tools list permits broad test runners
+#     (pytest, pnpm test). For this demo we narrow it to `npm test:*`
+#     so the agent can't accidentally try Python tooling.
+#   - It documents the fact that pipeline.yaml lives next to project.yaml
+#     and travels with the project — your actual override pattern.
+id: two-repo-demo-pipeline
+name: Two-Repo Demo Pipeline
+version: "1.0.0"
+
+stages:
+  - name: 需求分析
+    agent_config:
+      system_prompt: |
+        你是需求分析师。读取用户提交的需求描述，输出一份结构化的 PRD：
+        包含背景、目标、受影响 repo、核心用户故事、非目标。
+        注意：本项目有 frontend（静态站）和 backend（Node API）两个 repo，
+        在"受影响 repo"段落里明确点名。
+        不要写实施细节，那是下一道工序的事。
+      allowed_tools:
+        - Read
+        - Write
+        - Grep
+        - Glob
+    artifacts:
+      - path: .auto-finish/artifacts/需求分析/prd.md
+        type: markdown
+        description: 结构化的 PRD，作为后续工序的输入
+        required: true
+    on_failure: pause
+
+  - name: 方案设计
+    agent_config:
+      system_prompt: |
+        你是方案设计师。基于上一步的 PRD，输出一份跨 repo 的实施方案：
+        包含数据流、API 契约、每个 repo 的改动清单、风险与回滚策略。
+        最后必须列出明确的跨 repo 改动顺序提示（通常 backend 先于 frontend）。
+      allowed_tools:
+        - Read
+        - Write
+        - Grep
+        - Glob
+    artifacts:
+      - path: .auto-finish/artifacts/方案设计/design.md
+        type: markdown
+        description: 跨 repo 实施方案，人工 review 后才放行实施
+        required: true
+    gate:
+      required: true
+      review_targets:
+        - .auto-finish/artifacts/方案设计/design.md
+    on_failure: pause
+
+  - name: 实施
+    agent_config:
+      system_prompt: |
+        你是实施工程师。按照方案设计文档落地代码改动，覆盖 frontend 与
+        backend 两个 repo。小步提交、保持每次改动可解释。完成后输出本轮
+        的 diff 摘要（按 repo 分节）。
+      allowed_tools:
+        - Read
+        - Write
+        - Edit
+        - Grep
+        - Glob
+        - Bash(git:*)
+        - Bash(npm:*)
+    artifacts:
+      - path: .auto-finish/artifacts/实施/diff-summary.md
+        type: markdown
+        description: 本轮代码改动摘要（人类可读版，按 repo 分节）
+        required: true
+      - path: .auto-finish/artifacts/实施/changes.diff
+        type: diff
+        description: 聚合后的统一 diff，便于 dashboard 预览
+        required: false
+    on_failure: retry
+
+  - name: 验证
+    agent_config:
+      # Demo-specific override: this project is JS top-to-bottom, so we only
+      # whitelist `npm test:*`. The bundled default also permits pytest /
+      # pnpm. Removing those narrows the blast radius for this concrete demo.
+      system_prompt: |
+        你是验证工程师。在 frontend 和 backend 两个 repo 下分别运行
+        `npm test`，把结果聚合到 test-report.md。每个 repo 的输出独立成节，
+        失败用例附最小复现路径。两边都绿才放行 PR。
+      allowed_tools:
+        - Read
+        - Write
+        - Bash(npm test:*)
+        - Bash(git:*)
+    artifacts:
+      - path: .auto-finish/artifacts/验证/test-report.md
+        type: markdown
+        description: frontend + backend 的 npm test 结果聚合，gate 审核此文件
+        required: true
+    gate:
+      required: true
+      review_targets:
+        - .auto-finish/artifacts/验证/test-report.md
+        - .auto-finish/artifacts/实施/diff-summary.md
+    on_failure: pause

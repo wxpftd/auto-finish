@@ -1,0 +1,28 @@
+{
+  "id": "demo-fullstack",
+  "name": "demo-fullstack",
+  "description": "two-repo demo project",
+  "sandbox_config": {
+    "provider": "daytona",
+    "image": "node:20"
+  },
+  "claude_config": {
+    "credentials_source": "host_mount"
+  },
+  "repos": [
+    {
+      "name": "frontend",
+      "git_url": "https://example.com/frontend.git",
+      "default_branch": "main",
+      "working_dir": "/workspace/frontend",
+      "test_command": "npm test"
+    },
+    {
+      "name": "backend",
+      "git_url": "https://example.com/backend.git",
+      "default_branch": "main",
+      "working_dir": "/workspace/backend",
+      "test_command": "pytest"
+    }
+  ]
+}

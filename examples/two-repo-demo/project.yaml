@@ -1,0 +1,85 @@
+# two-repo-demo / project.yaml
+#
+# Concrete, runnable-shape example pairing a static-site frontend with a small
+# Express/Fastify-style backend API. Use it as a starting template:
+#
+#   1. Drop these two files into your auto-finish workspace.
+#   2. Replace the fixture git URLs below with your real repos.
+#   3. Make sure ~/.claude/.credentials.json exists on the host
+#      (claude_config.credentials_source = host_mount).
+#   4. Point your sandbox_config.daytona_endpoint at a running Daytona server
+#      (the bundled docker-compose.yml at the workspace root brings one up
+#      on http://localhost:3986).
+#
+# This project pairs with ./pipeline.yaml — an override of the default
+# 4-stage pipeline that swaps the `验证` stage's test commands for the
+# concrete frontend/backend tooling used here.
+#
+# default_pipeline_id below references the override pipeline, NOT the
+# bundled default. Adjust if you'd rather follow the upstream default.
+id: two-repo-demo
+name: Two-Repo Demo
+description: |
+  End-to-end demo project: a static-site frontend and a small Express/Fastify
+  backend API. Used as the canonical "shows how multi-repo scheduling works"
+  example for auto-finish.
+
+repos:
+  - name: frontend
+    git_url: https://github.com/auto-finish-examples/two-repo-frontend.git
+    default_branch: main
+    working_dir: /workspace/frontend
+    test_command: npm test
+    pr_template: |
+      ## Summary
+
+      Frontend changes for requirement <id>.
+
+      ## Related
+      Backend PR: backend#<number>
+
+  - name: backend
+    git_url: https://github.com/auto-finish-examples/two-repo-backend.git
+    default_branch: main
+    working_dir: /workspace/backend
+    test_command: npm test
+    pr_template: |
+      ## Summary
+
+      Backend API changes for requirement <id>.
+
+      ## Related
+      Frontend PR: frontend#<number>
+
+default_pipeline_id: two-repo-demo-pipeline
+
+sandbox_config:
+  provider: daytona
+  daytona_endpoint: http://localhost:3986
+  image: ghcr.io/auto-finish-examples/two-repo-sandbox:latest
+  env:
+    NODE_ENV: development
+    PORT: "3000"
+  setup_commands:
+    - cd /workspace/frontend && npm ci
+    - cd /workspace/backend && npm ci
+
+claude_config:
+  credentials_source: host_mount
+  credentials_path: ~/.claude/.credentials.json
+  allowed_tools:
+    - Read
+    - Write
+    - Edit
+    - Grep
+    - Glob
+    - Bash(git:*)
+    - Bash(npm:*)
+  mcp_servers:
+    github:
+      command: npx
+      args:
+        - -y
+        - "@modelcontextprotocol/server-github"
+      env:
+        GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}

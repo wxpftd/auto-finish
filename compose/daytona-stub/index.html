@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Daytona stub — auto-finish</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem; color: #222; }
+    h1 { font-size: 1.4rem; }
+    code { background: #f4f4f4; padding: 0.1rem 0.35rem; border-radius: 3px; }
+    pre { background: #f4f4f4; padding: 1rem; border-radius: 6px; overflow-x: auto; }
+    .warn { background: #fff3cd; border-left: 4px solid #ffc107; padding: 0.75rem 1rem; margin: 1rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Daytona is not running here</h1>
+  <div class="warn">
+    This is the <strong>auto-finish daytona-stub</strong> — an nginx placeholder.
+    The real Daytona OSS is a separate multi-service stack and is not bundled
+    into this docker-compose. The orchestrator will fail to create sandboxes
+    until you bring up a real Daytona server.
+  </div>
+
+  <h2>Install local Daytona OSS</h2>
+  <pre><code>git clone https://github.com/daytonaio/daytona
+cd daytona/docker
+docker compose up -d</code></pre>
+
+  <p>By default, Daytona's API listens on port <code>3986</code>. Once it's up,
+  stop this stub:</p>
+
+  <pre><code>docker compose -f /path/to/auto-finish/docker-compose.yml stop daytona-stub</code></pre>
+
+  <p>Then point the orchestrator at the real server by editing
+  <code>.env</code>:</p>
+
+  <pre><code>DAYTONA_API_URL=http://localhost:3986
+DAYTONA_API_KEY=&lt;token from daytona dashboard&gt;</code></pre>
+
+  <h2>Or use Daytona Cloud</h2>
+  <p>Set <code>DAYTONA_API_URL</code> to the cloud endpoint and
+  <code>DAYTONA_API_KEY</code> to your cloud API token, then stop the stub.</p>
+
+  <p>See <a href="https://www.daytona.io/docs/en/oss-deployment/">Daytona OSS docs</a>.</p>
+</body>
+</html>

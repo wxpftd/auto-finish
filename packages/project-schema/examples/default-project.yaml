@@ -1,0 +1,67 @@
+# Example auto-finish project: two repos (frontend Node + backend Python),
+# Daytona sandbox provider, host-mounted Claude credentials.
+#
+# default_pipeline_id references the bundled pipeline-schema example
+# (packages/pipeline-schema/examples/default-pipeline.yaml, id: "default").
+id: example-app
+name: Example App
+description: |
+  Two-repo example: a Node.js frontend and a Python backend. Used by
+  auto-finish smoke tests to exercise multi-repo scheduling end-to-end.
+
+repos:
+  - name: frontend
+    git_url: https://github.com/example-org/example-frontend.git
+    default_branch: main
+    working_dir: /workspace/frontend
+    test_command: npm test
+    pr_template: |
+      ## Summary
+
+      ## Related
+      Cross-repo PR: backend#<number>
+
+  - name: backend
+    git_url: git@github.com:example-org/example-backend.git
+    default_branch: main
+    working_dir: /workspace/backend
+    test_command: pytest
+    pr_template: |
+      ## Summary
+
+      ## Related
+      Cross-repo PR: frontend#<number>
+
+default_pipeline_id: default
+
+sandbox_config:
+  provider: daytona
+  daytona_endpoint: http://localhost:3986
+  image: ghcr.io/example-org/auto-finish-sandbox:latest
+  env:
+    NODE_ENV: development
+    PYTHONUNBUFFERED: "1"
+  setup_commands:
+    - cd /workspace/frontend && npm ci
+    - cd /workspace/backend && pip install -r requirements.txt
+
+claude_config:
+  credentials_source: host_mount
+  credentials_path: ~/.claude/.credentials.json
+  allowed_tools:
+    - Read
+    - Write
+    - Edit
+    - Grep
+    - Glob
+    - Bash(git:*)
+    - Bash(npm:*)
+    - Bash(pytest:*)
+  mcp_servers:
+    github:
+      command: npx
+      args:
+        - -y
+        - "@modelcontextprotocol/server-github"
+      env:
+        GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}

@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # Workspace npm dependencies. Dependabot follows pnpm-workspace.yaml
+  # automatically when ecosystem is `npm` and we point at the repo root.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    # Major bumps for the Svelte/SvelteKit/Vite stack tend to require code
+    # changes; let humans drive those.
+    ignore:
+      - dependency-name: svelte
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@sveltejs/kit'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@sveltejs/vite-plugin-svelte'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@sveltejs/adapter-node'
+        update-types: ['version-update:semver-major']
+      - dependency-name: vite
+        update-types: ['version-update:semver-major']
+
+  # Keep our pinned action major versions current on patch/minor.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

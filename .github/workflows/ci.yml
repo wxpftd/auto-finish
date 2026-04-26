@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel any in-flight run on the same branch / PR when a new push lands.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only by default; nothing in this workflow needs more.
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: build-and-test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # NOTE: pnpm/action-setup MUST run before actions/setup-node so that
+      # setup-node's `cache: 'pnpm'` can call `pnpm store path` to know
+      # where the pnpm store lives. Pin to match `packageManager` in
+      # package.json (pnpm@9.12.0).
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+          run_install: false
+
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # DEVIATION FROM SPEC: build runs before typecheck.
+      # The orchestrator package's typecheck (`tsc --noEmit`) imports from
+      # workspace packages (`@auto-finish/pipeline-schema`,
+      # `@auto-finish/project-schema`) whose `main`/`types` entries point
+      # at `./dist/*`. Until those packages are built once, type resolution
+      # fails with TS2307. Building first produces the .d.ts artifacts so
+      # typecheck can resolve workspace imports.
+      - name: Build
+        run: pnpm -r build
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      # Default `pnpm -r test` skips the Daytona integration suite — those
+      # tests gate on `DAYTONA_INTEGRATION=1` via `describe.skipIf(...)`.
+      # We deliberately do not set that env var here.
+      - name: Test
+        run: pnpm -r test
+
+      - name: Dashboard svelte-check
+        run: pnpm --filter @auto-finish/dashboard check
