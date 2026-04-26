@@ -35,6 +35,7 @@ import { EventBus } from '../src/eventbus/index.js';
 import { runRequirement } from '../src/runner/index.js';
 import type { Pipeline } from '@auto-finish/pipeline-schema';
 import { LocalSandboxProvider } from './local-provider.js';
+import { requireClaude, requireGit } from './_guards.js';
 
 function runCmd(
   cmd: string,
@@ -100,6 +101,8 @@ function buildSimplePipeline(): Pipeline {
 }
 
 async function main(): Promise<void> {
+  requireGit();
+  requireClaude();
   console.log('[smoke] setting up remote git repo…');
   const remoteUrl = await setupRemoteRepo();
   console.log(`[smoke] remote at ${remoteUrl}`);

@@ -11,3 +11,4 @@ dist/
 .vitest/
 coverage/
 .turbo/
+.smoke-logs/

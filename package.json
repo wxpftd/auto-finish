@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --noEmit",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "smoke:all": "pnpm --filter @auto-finish/orchestrator smoke:all"
   },
   "devDependencies": {
     "typescript": "^5.6.0"

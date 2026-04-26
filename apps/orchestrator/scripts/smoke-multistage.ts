@@ -26,6 +26,7 @@ import { EventBus } from '../src/eventbus/index.js';
 import { runRequirement } from '../src/runner/index.js';
 import type { Pipeline } from '@auto-finish/pipeline-schema';
 import { LocalSandboxProvider } from './local-provider.js';
+import { requireClaude, requireGit } from './_guards.js';
 
 interface CmdResult {
   exit_code: number;
@@ -180,6 +181,8 @@ async function listRecursive(dir: string): Promise<string[]> {
 }
 
 async function main(): Promise<void> {
+  requireGit();
+  requireClaude();
   const overall = Date.now();
   console.log('[smoke4] setting up remote git repo…');
   const remoteUrl = await setupRemoteRepo();

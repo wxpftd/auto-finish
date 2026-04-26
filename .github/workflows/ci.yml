@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Manual trigger ONLY for the heavyweight `smoke` job below. The existing
+  # push/pull_request triggers are deliberately left exactly as-is so the
+  # cheap `build-and-test` job's trigger surface does not expand.
+  workflow_dispatch:
 
 # Cancel any in-flight run on the same branch / PR when a new push lands.
 concurrency:
@@ -71,3 +75,69 @@ jobs:
 
       - name: Dashboard svelte-check
         run: pnpm --filter @auto-finish/dashboard check
+
+  # ---------------------------------------------------------------------------
+  # `smoke` job — heavyweight end-to-end smoke harness.
+  #
+  # Runs `pnpm smoke:all`, which sequentially executes the orchestrator's
+  # smoke scripts (smoke-runner, smoke-gate, smoke-multistage, smoke-github).
+  # Most of these spawn a real `claude` CLI subprocess and/or shell out to
+  # `gh`, so they are NEITHER fast NOR cheap — that's why this job is gated.
+  #
+  # Trigger:
+  #   - `workflow_dispatch` (Actions tab → "Run workflow"). Manual ONLY.
+  #     We deliberately do NOT auto-fire on push/PR — the cheap
+  #     `build-and-test` job above covers that loop. To kick smoke from a
+  #     PR, push and then click "Run workflow" against the PR branch.
+  #
+  # The harness handles missing credentials gracefully: each guarded smoke
+  # script prints `SKIPPED: <reason>` and exits 0 when its prerequisites
+  # (claude CLI, gh auth, SSH access) are absent. CI without secrets will
+  # therefore SKIP the credential-bound scripts and PASS overall.
+  # ---------------------------------------------------------------------------
+  smoke:
+    name: smoke (manual)
+    runs-on: ubuntu-latest
+    # Per-script wallclock cap in smoke-all.ts is 15 min; with 4 scripts the
+    # absolute worst case is ~60 min. In CI without credentials everything
+    # SKIPs in <30 s, so the bound only matters once secrets are wired.
+    timeout-minutes: 60
+    if: github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+          run_install: false
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (workspace deps required for smoke imports)
+        run: pnpm -r build
+
+      # Smoke harness: no claude/gh credentials in CI by default, so the
+      # credential-bound scripts will SKIP cleanly. That is OK — see the
+      # job-level docstring above.
+      - name: Run smoke harness
+        run: pnpm smoke:all
+
+      # Always upload logs even on failure so a developer can reproduce
+      # locally without re-running the heavyweight job.
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs
+          path: .smoke-logs/
+          if-no-files-found: ignore

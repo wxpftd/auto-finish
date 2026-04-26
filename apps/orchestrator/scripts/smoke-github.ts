@@ -33,6 +33,12 @@ import type { Pipeline } from '@auto-finish/pipeline-schema';
 import { LocalSandboxProvider } from './local-provider.js';
 import type { RepoDiff, RepoSpec } from '../src/multi-repo/index.js';
 import type { SandboxSession } from '../src/sandbox/interface.js';
+import {
+  requireClaude,
+  requireGhAuth,
+  requireGit,
+  requireGitRemoteAccess,
+} from './_guards.js';
 
 const REPO_SSH = 'git@github.com:wxpftd/auto-finish-smoke-2026.git';
 const REPO_SLUG = 'wxpftd/auto-finish-smoke-2026';
@@ -223,6 +229,10 @@ async function cleanup(prNumber: number | null, branchName: string): Promise<voi
 }
 
 async function main(): Promise<void> {
+  requireGit();
+  requireClaude();
+  requireGhAuth();
+  requireGitRemoteAccess(REPO_SSH);
   const wallStart = Date.now();
   // Unique branch name with timestamp + random hex.
   const branchName = `auto-finish/smoke-${Date.now()}-${randomBytes(3).toString('hex')}`;

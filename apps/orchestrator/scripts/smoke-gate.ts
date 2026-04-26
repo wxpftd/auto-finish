@@ -46,6 +46,7 @@ import type { BusMessage } from '../src/eventbus/index.js';
 import { runRequirement } from '../src/runner/index.js';
 import type { Pipeline } from '@auto-finish/pipeline-schema';
 import { LocalSandboxProvider } from './local-provider.js';
+import { requireClaude, requireGit } from './_guards.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -405,6 +406,8 @@ async function runScenario(args: {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  requireGit();
+  requireClaude();
   const overallStart = Date.now();
   console.log(`[smoke-gate] starting at ${new Date().toISOString()}`);
 
