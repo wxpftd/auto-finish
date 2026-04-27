@@ -1,15 +1,68 @@
 import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
+import { z } from 'zod';
 import type { Db } from '../../db/index.js';
-import { pipeline_runs, pull_requests, schema } from '../../db/index.js';
+import type { EventBus } from '../../eventbus/index.js';
+import { pipeline_runs, pull_requests, requirements, schema } from '../../db/index.js';
+import { runRequirement } from '../../runner/runner.js';
+import { defaultMakeSandboxProvider } from '../../sandbox/factory.js';
+import { validateJson } from '../_validate.js';
 
 export interface RunsRouteDeps {
   db: Db;
+  bus?: EventBus;
 }
+
+const StartRunBody = z
+  .object({
+    requirement_id: z.string().min(1),
+  })
+  .strict();
 
 export function buildRunsRoute(deps: RunsRouteDeps): Hono {
   const app = new Hono();
   const { db } = deps;
+
+  // Trigger a run for an existing requirement. Fire-and-forget: returns 202
+  // with the requirement_id and runs runRequirement in the background. Client
+  // polls /api/requirements/:id/runs (or subscribes via WS) for progress.
+  //
+  // Errors during the async run are logged to stderr but never surfaced to
+  // the caller — the run state lives in the DB (stage_executions, requirement
+  // status), so a failed run leaves visible breadcrumbs there.
+  app.post('/start', async (c) => {
+    const result = await validateJson(c, StartRunBody);
+    if (!result.ok) return result.response;
+    const { requirement_id } = result.data;
+
+    if (!requirements.getRequirement(db, requirement_id)) {
+      return c.json(
+        { error: 'not_found', message: `requirement not found: ${requirement_id}` },
+        404,
+      );
+    }
+    if (!deps.bus) {
+      return c.json(
+        {
+          error: 'no_bus',
+          message:
+            'orchestrator started without an event bus; runner cannot be triggered',
+        },
+        503,
+      );
+    }
+    const bus = deps.bus;
+
+    void runRequirement(
+      { db, bus, makeSandboxProvider: defaultMakeSandboxProvider },
+      requirement_id,
+    ).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[runs] runRequirement failed for ${requirement_id}: ${msg}`);
+    });
+
+    return c.json({ accepted: true, requirement_id }, 202);
+  });
 
   app.get('/:id', (c) => {
     const id = c.req.param('id');

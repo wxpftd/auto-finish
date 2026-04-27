@@ -978,6 +978,10 @@ export async function runRequirement(
     return { status: 'completed', prs: publishedPrs };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
+    const stack = err instanceof Error ? err.stack : undefined;
+    console.error(
+      `[runner] requirement ${requirement.id} failed: ${error}${stack ? '\n' + stack : ''}`,
+    );
     if (runId) {
       requirementsRepo.updateRequirementStatus(db, requirement.id, 'failed');
       pipeline_runs.finishRun(db, runId);
