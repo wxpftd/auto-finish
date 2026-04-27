@@ -218,6 +218,13 @@ export async function openPullRequest(
 /**
  * Edit an existing PR's body. Used by Phase 2 of the cross-link flow,
  * after every sibling PR has been created and we know its URL.
+ *
+ * Uses `gh api -X PATCH /repos/<slug>/pulls/<n> -f body=<...>` (REST) instead
+ * of `gh pr edit`. Reason: as of 2024-05 GitHub sunset Projects (classic),
+ * and `gh pr edit` internally queries `repository.pullRequest.projectCards`
+ * via GraphQL — the deprecation has hardened into a 4xx that breaks any
+ * automated edit flow. The REST PATCH endpoint doesn't touch projectCards
+ * and only updates the fields explicitly passed.
  */
 export async function editPullRequestBody(args: {
   session: SandboxSession;
@@ -229,18 +236,17 @@ export async function editPullRequestBody(args: {
   const slug = inferRepoSlug(repo.git_url);
   const res = await session.run([
     'gh',
-    'pr',
-    'edit',
-    String(prNumber),
-    '--repo',
-    slug,
-    '--body',
-    body,
+    'api',
+    '-X',
+    'PATCH',
+    `/repos/${slug}/pulls/${prNumber}`,
+    '-f',
+    `body=${body}`,
   ]);
   if (res.exit_code !== 0) {
     throw new PrCreateError(
       slug,
-      `gh pr edit ${prNumber} failed for ${slug}: ${res.stderr || res.stdout}`,
+      `gh api PATCH /repos/${slug}/pulls/${prNumber} failed: ${res.stderr || res.stdout}`,
       res.exit_code,
       res.stderr,
       res.stdout,

@@ -189,11 +189,11 @@ describe('openPullRequest', () => {
 });
 
 describe('editPullRequestBody', () => {
-  it('runs gh pr edit with --repo and --body', async () => {
+  it('uses gh api PATCH (REST, not gh pr edit which trips Projects classic deprecation)', async () => {
     const session = new FakeSession({
       scripts: [
         {
-          match: ['gh', 'pr', 'edit', '42', '--repo', 'owner/frontend'],
+          match: ['gh', 'api', '-X', 'PATCH', '/repos/owner/frontend/pulls/42'],
           respond: () => ok(),
         },
       ],
@@ -209,13 +209,12 @@ describe('editPullRequestBody', () => {
     const call = session.runCalls[0];
     expect(call?.argv).toEqual([
       'gh',
-      'pr',
-      'edit',
-      '42',
-      '--repo',
-      'owner/frontend',
-      '--body',
-      'new body\nwith newline',
+      'api',
+      '-X',
+      'PATCH',
+      '/repos/owner/frontend/pulls/42',
+      '-f',
+      'body=new body\nwith newline',
     ]);
   });
 });

@@ -134,6 +134,12 @@ export async function publishPullRequests(
   }
   for (const o of opened) siblings.set(o.repo_id, o.pr_url);
 
+  // Phase 2 edits are best-effort: if any cross-link edit fails (e.g. GitHub
+  // API hiccup, transient auth issue), the PRs themselves are already on the
+  // remote and need to be persisted by the caller. Throwing would force the
+  // caller's catch path to discard the entire `opened` array — losing track
+  // of PRs that genuinely landed. We log a warning and keep going so the
+  // caller still gets the populated array back.
   for (const o of opened) {
     const entry = entryByRepoId.get(o.repo_id);
     if (entry === undefined) continue;
@@ -148,12 +154,21 @@ export async function publishPullRequests(
       siblings,
       names,
     });
-    await editPullRequestBody({
-      session,
-      repo: entry.repo,
-      prNumber: o.pr_number,
-      body,
-    });
+    try {
+      await editPullRequestBody({
+        session,
+        repo: entry.repo,
+        prNumber: o.pr_number,
+        body,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[publishPullRequests] phase-2 cross-link edit failed for PR #${o.pr_number} ` +
+          `in ${entry.repo.name}: ${msg}. The PR is open at ${o.pr_url}; its body's ` +
+          `"Related PRs" section will show the phase-1 "pending" placeholder.`,
+      );
+    }
   }
 
   return opened;

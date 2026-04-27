@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { RepoDiff, RepoSpec } from '../multi-repo/index.js';
 import { publishPullRequests } from './orchestrate.js';
@@ -91,13 +91,13 @@ describe('publishPullRequests', () => {
           ],
           respond: () => ok('https://github.com/owner/backend/pull/20\n'),
         },
-        // gh pr edit: same order.
+        // gh api PATCH (REST, replaces gh pr edit — see gh-pr.ts header).
         {
-          match: ['gh', 'pr', 'edit', '10', '--repo', 'owner/frontend'],
+          match: ['gh', 'api', '-X', 'PATCH', '/repos/owner/frontend/pulls/10'],
           respond: () => ok(),
         },
         {
-          match: ['gh', 'pr', 'edit', '20', '--repo', 'owner/backend'],
+          match: ['gh', 'api', '-X', 'PATCH', '/repos/owner/backend/pulls/20'],
           respond: () => ok(),
         },
       ],
@@ -143,13 +143,14 @@ describe('publishPullRequests', () => {
     }
 
     const editCalls = session.runCalls.filter(
-      (c) => c.argv[0] === 'gh' && c.argv[2] === 'edit',
+      (c) => c.argv[0] === 'gh' && c.argv[1] === 'api',
     );
     expect(editCalls).toHaveLength(2);
-    // Phase 2: bodies have real URLs and no more placeholders.
+    // Phase 2: bodies have real URLs and no more placeholders. `gh api` carries
+    // the body as a single `body=<full body>` argv element via `-f`.
     for (const c of editCalls) {
-      const bodyIdx = c.argv.indexOf('--body');
-      const body = c.argv[bodyIdx + 1] ?? '';
+      const bodyArg = c.argv.find((a) => a.startsWith('body=')) ?? '';
+      const body = bodyArg.slice('body='.length);
       expect(body).toContain(
         '- frontend: https://github.com/owner/frontend/pull/10',
       );
@@ -171,7 +172,7 @@ describe('publishPullRequests', () => {
           respond: () => ok('https://github.com/owner/backend/pull/55\n'),
         },
         {
-          match: ['gh', 'pr', 'edit', '55', '--repo', 'owner/backend'],
+          match: ['gh', 'api', '-X', 'PATCH', '/repos/owner/backend/pulls/55'],
           respond: () => ok(),
         },
       ],
@@ -212,6 +213,54 @@ describe('publishPullRequests', () => {
     const body = createCall?.argv[bodyIdx + 1] ?? '';
     expect(body).not.toContain('Related PRs');
     expect(body).not.toContain('pending');
+  });
+
+  it('phase-2 cross-link edit failure does NOT discard already-opened PRs', async () => {
+    // Hardening for the case where the cross-link PATCH fails after PRs have
+    // already been pushed and opened on GitHub. Throwing here would force the
+    // runner's outer catch to mark the run failed AND skip persisting the
+    // pull_requests rows — losing track of PRs that genuinely landed.
+    const branch = 'auto-finish/req-4';
+    const session = new FakeSession({
+      scripts: [
+        ...pushScripts(BACKEND, branch, 'b1'),
+        {
+          match: ['gh', 'pr', 'create', '--repo', 'owner/backend'],
+          respond: () => ok('https://github.com/owner/backend/pull/77\n'),
+        },
+        {
+          match: ['gh', 'api', '-X', 'PATCH', '/repos/owner/backend/pulls/77'],
+          respond: () => fail(1, '', 'simulated GitHub API hiccup'),
+        },
+      ],
+    });
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = await publishPullRequests({
+        session,
+        requirementId: 'req-4',
+        requirementTitle: 'Edge case',
+        requirementDescription: '',
+        perRepo: [{ repo: BACKEND, diff: diff(BACKEND, true) }],
+        baseBranch: (r) => r.default_branch,
+        branchName: branch,
+      });
+
+      // The PR is open and the array reflects that — runner can persist it.
+      expect(result).toEqual([
+        {
+          repo_id: 'r-be',
+          pr_url: 'https://github.com/owner/backend/pull/77',
+          pr_number: 77,
+        },
+      ]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('phase-2 cross-link edit failed for PR #77'),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('returns empty array when no repo has changes', async () => {
