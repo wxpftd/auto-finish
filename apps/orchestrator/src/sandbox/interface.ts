@@ -53,8 +53,6 @@ export interface SandboxConfig {
   image?: string;
   /** Environment variables to set inside the sandbox. */
   env?: Record<string, string>;
-  /** Commands to run after the sandbox boots, before it's handed back. */
-  setup_commands?: string[];
   /** Default working directory for `run()` and `startStream()`. */
   working_dir?: string;
   /**

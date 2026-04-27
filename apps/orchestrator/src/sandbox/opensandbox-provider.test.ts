@@ -331,16 +331,9 @@ describe('OpenSandboxProvider unit', () => {
     }
   });
 
-  it('setup_commands non-zero exit destroys the session and throws', async () => {
-    const provider = new OpenSandboxProvider();
-    // The /bin/sh -c invocation through InMemoryProvider falls through to
-    // exit-1-with-stderr-equals-script for arbitrary scripts.
-    await expect(
-      provider.create({
-        setup_commands: ['definitely-bad-command'],
-      }),
-    ).rejects.toThrow(/setup command failed/);
-  });
+  // `setup_commands` is no longer a SandboxConfig field — the runner drives
+  // them post-clone (see runner/runner.ts). Provider-level setup-failure
+  // semantics are now exercised by runner-level tests.
 });
 
 // Use InMemoryProvider import to keep this in the import graph for the mock factory.

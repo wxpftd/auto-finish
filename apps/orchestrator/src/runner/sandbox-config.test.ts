@@ -29,7 +29,7 @@ const baseProjectCfg: ProjectSandboxConfig = {
 };
 
 describe('buildSandboxCreateConfig', () => {
-  it('cold_only: passes image and env through unchanged', () => {
+  it('cold_only: passes image and env through unchanged; does NOT forward setup_commands (runner drives those post-clone)', () => {
     const result = buildSandboxCreateConfig({
       ...baseProjectCfg,
       warm_strategy: 'cold_only',
@@ -40,7 +40,6 @@ describe('buildSandboxCreateConfig', () => {
     expect(result).toEqual({
       image: 'node:20',
       env: { NODE_ENV: 'production' },
-      setup_commands: ['npm ci'],
     });
     expect(result.volumes).toBeUndefined();
   });

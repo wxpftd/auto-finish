@@ -170,11 +170,11 @@ function buildVolumeBackend(
 export function buildSandboxCreateConfig(
   cfg: import('@auto-finish/project-schema').SandboxConfig,
 ): import('../sandbox/interface.js').SandboxConfig {
+  // setup_commands intentionally NOT forwarded to SandboxConfig: the runner
+  // executes them post-clone (see runOneSetupCommands) so the schema's
+  // "after repo clones" promise actually holds.
   const base: import('../sandbox/interface.js').SandboxConfig = {
     ...(cfg.env !== undefined ? { env: cfg.env } : {}),
-    ...(cfg.setup_commands !== undefined
-      ? { setup_commands: cfg.setup_commands }
-      : {}),
   };
   switch (cfg.warm_strategy) {
     case 'baked_image':
@@ -227,11 +227,11 @@ export function buildSandboxCreateConfig(
 export function buildColdSandboxConfig(
   cfg: import('@auto-finish/project-schema').SandboxConfig,
 ): import('../sandbox/interface.js').SandboxConfig {
+  // setup_commands intentionally NOT forwarded to SandboxConfig: the runner
+  // executes them post-clone (see runOneSetupCommands) so the schema's
+  // "after repo clones" promise actually holds.
   const base: import('../sandbox/interface.js').SandboxConfig = {
     ...(cfg.env !== undefined ? { env: cfg.env } : {}),
-    ...(cfg.setup_commands !== undefined
-      ? { setup_commands: cfg.setup_commands }
-      : {}),
   };
   switch (cfg.warm_strategy) {
     case 'baked_image':
@@ -572,6 +572,21 @@ export async function runRequirement(
           .map((f) => `${f.repo_id}: ${f.error}`)
           .join('; ')}`,
       );
+    }
+
+    // 3a. Run user-defined setup_commands now that repos are cloned.
+    // The ProjectSandboxConfig.setup_commands field is documented as running
+    // "after repo clones but before the first stage runs"; we used to dispatch
+    // it inside OpenSandboxProvider.create(), which fired it BEFORE cloneRepos
+    // so commands like `cd /workspace/<repo> && npm ci` always failed silently.
+    // Driving them here makes the docstring true.
+    for (const cmd of project.sandbox_config_json.setup_commands ?? []) {
+      const r = await session.run(['/bin/sh', '-c', cmd]);
+      if (r.exit_code !== 0) {
+        throw new Error(
+          `setup command failed (exit ${r.exit_code}): ${cmd}\n${r.stderr}`,
+        );
+      }
     }
 
     // 4. Run each stage -------------------------------------------------------

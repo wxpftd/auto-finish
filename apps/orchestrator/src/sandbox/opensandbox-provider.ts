@@ -527,20 +527,15 @@ export class OpenSandboxProvider implements SandboxProvider {
       timeoutSeconds: this.#defaultTimeoutSeconds,
     };
     const sdkSandbox = await Sandbox.create(createOpts);
-    const session = new OpenSandboxSession(sdkSandbox, config.working_dir);
+    return new OpenSandboxSession(sdkSandbox, config.working_dir);
 
-    // Run user-provided setup_commands serially. Stop on the first
-    // non-zero exit so the caller doesn't get a half-broken sandbox.
-    const setup = config.setup_commands ?? [];
-    for (const cmd of setup) {
-      const r = await session.run(['/bin/sh', '-c', cmd]);
-      if (r.exit_code !== 0) {
-        await session.destroy();
-        throw new Error(
-          `setup command failed (exit ${r.exit_code}): ${cmd}\n${r.stderr}`,
-        );
-      }
-    }
-    return session;
+    // NOTE: ProjectSandboxConfig.setup_commands is intentionally NOT executed
+    // here. That field promises to run "after repo clones but before the first
+    // stage runs" — but provider.create() happens BEFORE the runner's
+    // cloneRepos step. Running setup here would always fire commands like
+    // `cd /workspace/<repo> && npm ci` against a non-existent working_dir.
+    // The runner now drives setup_commands explicitly post-clone (see
+    // runner/runner.ts ~line 575). This provider intentionally exposes no
+    // hook for them.
   }
 }
