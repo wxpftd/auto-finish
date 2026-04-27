@@ -1,0 +1,13 @@
+{
+  "name": "auto-finish-be-smoke",
+  "version": "0.0.0",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node -e \"console.log('be tests: ok')\""
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

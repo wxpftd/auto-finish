@@ -1,0 +1,78 @@
+# auto-finish e2e smoke project: two-repo (echo demo).
+#
+# This file is consumed by scripts/e2e-smoke/bootstrap.sh, which substitutes
+# the two placeholders below before POSTing to /api/projects/from-yaml:
+#
+#   __PIPELINE_ID__   replaced with the DB id returned by POST /api/pipelines
+#   __GH_TOKEN__      replaced with the host gh CLI's token (gh auth token)
+#
+# Do NOT commit a token-substituted version of this file — bootstrap.sh keeps
+# the swap in-process.
+
+id: two-repo-smoke
+name: Two-Repo Smoke (e2e)
+description: |
+  End-to-end smoke for the two-repo runner against the OpenSandbox docker
+  provider. Pairs with examples/two-repo-demo/pipeline.yaml (4 stages, 2 gates).
+  See plans/github-mellow-gosling.md for context.
+
+repos:
+  - name: frontend
+    git_url: https://github.com/wxpftd/auto-finish-fe-smoke.git
+    default_branch: main
+    working_dir: /workspace/frontend
+    test_command: npm test
+    pr_template: |
+      ## Summary
+      Frontend changes for the auto-finish two-repo echo demo.
+
+      ## Related
+      Backend PR: backend#<number>
+
+  - name: backend
+    git_url: https://github.com/wxpftd/auto-finish-be-smoke.git
+    default_branch: main
+    working_dir: /workspace/backend
+    test_command: npm test
+    pr_template: |
+      ## Summary
+      Backend changes for the auto-finish two-repo echo demo.
+
+      ## Related
+      Frontend PR: frontend#<number>
+
+default_pipeline_id: __PIPELINE_ID__
+
+sandbox_config:
+  provider: opensandbox
+  endpoint: http://localhost:8080
+  # Pre-baked locally: docker build -f examples/warm-image.Dockerfile \
+  #   -t auto-finish/two-repo-smoke:base --target=base .
+  # Image contains node 20 + git + openssh + gh + claude CLI.
+  image: auto-finish/two-repo-smoke:base
+  warm_strategy: cold_only
+  env:
+    NODE_ENV: development
+    # Host gh token, injected so git push / gh pr create work inside the sandbox.
+    GH_TOKEN: __GH_TOKEN__
+  # setup_commands run during sandbox creation, BEFORE cloneRepos (verified
+  # against opensandbox-provider.ts:535). Anything here must be repo-independent.
+  # Strategy: configure git to substitute https://github.com/ with a token-bearing
+  # URL, so subsequent clone+push under multi-repo/clone.ts authenticates via $GH_TOKEN.
+  setup_commands:
+    - 'git config --global user.email "auto-finish@local"'
+    - 'git config --global user.name "auto-finish"'
+    - 'git config --global "url.https://x-access-token:${GH_TOKEN}@github.com/.insteadOf" "https://github.com/"'
+
+claude_config:
+  credentials_source: host_mount
+  credentials_path: ~/.claude/.credentials.json
+  allowed_tools:
+    - Read
+    - Write
+    - Edit
+    - Grep
+    - Glob
+    - Bash(git:*)
+    - Bash(npm:*)
+    - Bash(node:*)
