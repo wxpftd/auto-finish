@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "@auto-finish/pipeline-schema": "workspace:*",
-    "@auto-finish/project-schema": "workspace:*"
+    "@auto-finish/project-schema": "workspace:*",
+    "diff2html": "^3.4.56"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.5.4",

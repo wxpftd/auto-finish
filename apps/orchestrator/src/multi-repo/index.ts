@@ -21,3 +21,6 @@ export { writeManifest } from './manifest.js';
 
 export type { DetectChangesArgs, RepoDiff } from './diff.js';
 export { detectChanges, parseNameOnly, parseShortstat } from './diff.js';
+
+export type { GetDiffPatchArgs } from './diff-text.js';
+export { getDiffPatch } from './diff-text.js';

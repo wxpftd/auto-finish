@@ -40,6 +40,7 @@ import {
   stage_executions,
   gate_decisions,
   pull_requests as prsRepo,
+  artifacts as artifactsRepo,
 } from '../db/index.js';
 import type { StageEvent } from '../db/schema.js';
 import type { PipelineEvent } from '../pipeline/index.js';
@@ -47,7 +48,12 @@ import { buildExecutionPlan } from '../pipeline/index.js';
 import { buildClaudeInvocation } from '../claude/argv.js';
 import { runClaudeStage } from '../claude/spawn.js';
 import { injectClaudeCredentials } from '../claude/credentials.js';
-import { cloneRepos, writeManifest, detectChanges } from '../multi-repo/index.js';
+import {
+  cloneRepos,
+  writeManifest,
+  detectChanges,
+  getDiffPatch,
+} from '../multi-repo/index.js';
 import { publishPullRequests } from '../pr/index.js';
 import {
   detectDepInstallFailure,
@@ -277,6 +283,51 @@ function asStageEvent(kind: string, payload: Record<string, unknown>): StageEven
 }
 
 /**
+ * Capture each repo's full `git diff <base>` patch and persist as a 'diff'
+ * artifact under the given stage_execution_id. Failures are swallowed
+ * (`getDiffPatch` already returns '' on git error) — we don't want a diff
+ * snapshot failure to abort the run.
+ *
+ * Called twice per run when changes exist:
+ *   1. Right before a gate wait, so the gate page has a snapshot for review.
+ *   2. After `detectChanges` at run end, so the PR page mirrors the actual
+ *      patch content opened on GitHub.
+ *
+ * Per CLAUDE.md "Multi-repo `git diff` convention", `getDiffPatch` uses
+ * `git diff <base>` (no `...` form). See diff-text.ts file header.
+ */
+async function captureDiffArtifacts(args: {
+  db: import('../db/index.js').Db;
+  session: SandboxSession;
+  repos: { spec: RepoSpec; baseBranch: string }[];
+  stageExecutionId: string;
+}): Promise<void> {
+  for (const { spec, baseBranch } of args.repos) {
+    const patch = await getDiffPatch({
+      session: args.session,
+      repo: spec,
+      baseBranch,
+    });
+    if (patch.length === 0) continue;
+    try {
+      artifactsRepo.createArtifact(args.db, {
+        stage_execution_id: args.stageExecutionId,
+        path: `${spec.name}.patch`,
+        type: 'diff',
+        preview: patch,
+        content: patch,
+        storage_uri: 'inline://',
+      });
+    } catch (err) {
+      console.error(
+        `[runner] failed to persist diff artifact for ${spec.name}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+}
+
+/**
  * Wait for a gate decision to be recorded.
  *
  * Two signals race:
@@ -434,11 +485,28 @@ async function runOneStage(
 
   try {
     for await (const event of events) {
-      stage_executions.appendEvent(
-        deps.db,
-        args.stageExecutionId,
-        asStageEvent(event.kind, event as unknown as Record<string, unknown>),
+      const persisted = asStageEvent(
+        event.kind,
+        event as unknown as Record<string, unknown>,
       );
+      stage_executions.appendEvent(deps.db, args.stageExecutionId, persisted);
+
+      // Mirror the persisted event onto a separate WS topic so the
+      // dashboard's "developer view" can stream live tool_use / tool_result
+      // / assistant_text traces. Default subscribers (`run:{id}`) are NOT
+      // affected — bus topic match is exact (`eventbus/bus.ts`).
+      deps.bus.publish({
+        topic: `run:${args.runId}:debug`,
+        event: {
+          kind: 'stage_event_appended',
+          run_id: args.runId,
+          stage_execution_id: args.stageExecutionId,
+          stage_name: args.stageName,
+          event: persisted,
+          at: new Date().toISOString(),
+        },
+        emitted_at: new Date().toISOString(),
+      });
 
       if (event.kind === 'session_init' && !sessionCaptured) {
         sessionCaptured = true;
@@ -599,6 +667,7 @@ export async function runRequirement(
     // infinite loop.
     const restartedStages = new Set<string>();
     let stageIdx = 0;
+    let lastStageExecutionId: string | null = null;
     while (stageIdx < plan.stages.length) {
       const stage = plan.stages[stageIdx]!;
       // Persist a row up front so events can be appended.
@@ -828,6 +897,19 @@ export async function runRequirement(
       // approval path, so consumers grouping by `stage_completed` know the
       // stage truly finished. (See file header: Fix #13, Option A.)
       if (stage.has_gate) {
+        // Snapshot diff for the dashboard's gate page BEFORE we wait. The
+        // operator wants to see what the agent changed; the run-end diff
+        // capture is too late for them. Best-effort — failures don't abort.
+        await captureDiffArtifacts({
+          db,
+          session,
+          repos: repoRows.map((r, i) => ({
+            spec: repoSpecs[i] as RepoSpec,
+            baseBranch: r.default_branch,
+          })),
+          stageExecutionId: stageExec.id,
+        });
+
         publishEvent({
           bus,
           run_id: run.id,
@@ -929,6 +1011,10 @@ export async function runRequirement(
         });
       }
 
+      // Track the last successful stage so the run-end diff snapshot has
+      // a stage_execution_id to attach to.
+      lastStageExecutionId = stageExec.id;
+
       // Advance to the next stage. The cold-restart `continue` above
       // intentionally skips this so the same stage runs again.
       stageIdx += 1;
@@ -942,6 +1028,21 @@ export async function runRequirement(
       baseBranch: repoRows[0]?.default_branch ?? 'main',
       workingBranch: branchName,
     });
+
+    // Persist final diff patches so the dashboard can render them under the
+    // PR/finished view. Attach to the last successful stage_execution so the
+    // artifact has a definite home in the audit trail.
+    if (lastStageExecutionId !== null) {
+      await captureDiffArtifacts({
+        db,
+        session,
+        repos: repoRows.map((r, i) => ({
+          spec: repoSpecs[i] as RepoSpec,
+          baseBranch: r.default_branch,
+        })),
+        stageExecutionId: lastStageExecutionId,
+      });
+    }
 
     const perRepoForPr = repoSpecs.map((repo) => {
       const diff = diffs.find((d) => d.repo_id === repo.id) ?? {

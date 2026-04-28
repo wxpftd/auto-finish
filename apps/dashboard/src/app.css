@@ -1,9 +1,9 @@
 @import 'tailwindcss';
 
-/* ──────────────────────────────────────────────────────────────────────────
-   字体：工程师工具优先 system-ui，中文用 Noto Sans SC（无衬线，不再用宋体）
-   ────────────────────────────────────────────────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+/* 字体：工程师工具优先 system-ui，中文用 Noto Sans SC。
+   Google Fonts <link> 注入在 +layout.svelte 的 <svelte:head> 里 —
+   Tailwind v4 的 @import 'tailwindcss' 展开后会立即产生 preflight 规则，
+   再写 @import url() 会被 PostCSS 拒绝（"@import must precede all other statements"）。 */
 
 @theme {
   /* 灰阶 —— Linear 风的中性色，从近黑到接近白 */
@@ -200,6 +200,14 @@ html a {
   /* ── 元数据键值对 ─────────────────────────────────────────── */
   .kv-key  { color: var(--color-fg-2); }
   .kv-val  { color: var(--color-fg-1); }
+
+  /* ── 代码/日志 pre：软折行，不出横向滚动 ─────────────────────── */
+  .pre-soft {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    tab-size: 2;
+  }
 }
 
 /* 动效：克制的淡入 */
