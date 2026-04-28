@@ -1,6 +1,7 @@
 <script lang="ts">
-  import type { Pipeline, Requirement, RequirementStatus } from '$lib/api/types';
+  import type { Pipeline, Requirement } from '$lib/api/types';
   import PipelineProgress from './PipelineProgress.svelte';
+  import { formatRelative, requirementStatusLabels, shortId } from '$lib/i18n';
 
   let {
     requirement,
@@ -10,74 +11,62 @@
     pipeline: Pipeline;
   } = $props();
 
-  const statusStyles: Record<string, string> = {
-    queued: 'bg-slate-100 text-slate-700 ring-slate-200',
-    running: 'bg-blue-100 text-blue-800 ring-blue-200',
-    awaiting_gate: 'bg-amber-100 text-amber-800 ring-amber-200',
-    awaiting_changes: 'bg-rose-100 text-rose-800 ring-rose-200',
-    done: 'bg-emerald-100 text-emerald-800 ring-emerald-200',
-    failed: 'bg-rose-200 text-rose-900 ring-rose-300',
+  const tagClassFor: Record<string, string> = {
+    queued: 'tag-neutral',
+    running: 'tag-accent',
+    awaiting_gate: 'tag-warn',
+    awaiting_changes: 'tag-danger',
+    done: 'tag-success',
+    failed: 'tag-danger',
   };
 
-  const statusLabel: Record<string, string> = {
-    queued: 'queued',
-    running: 'running',
-    awaiting_gate: 'awaiting gate',
-    awaiting_changes: 'changes requested',
-    done: 'done',
-    failed: 'failed',
-  };
-
-  function styleFor(status: string): string {
-    return statusStyles[status] ?? 'bg-slate-100 text-slate-700 ring-slate-200';
+  function tagFor(status: string): string {
+    return `tag ${tagClassFor[status] ?? 'tag-neutral'}`;
   }
+
   function labelFor(status: string): string {
-    return statusLabel[status] ?? status;
+    return requirementStatusLabels[status] ?? status;
   }
 
-  let pillClass = $derived(
-    `pill ring-1 ring-inset ${styleFor(requirement.status)}`,
-  );
   let stageNames = $derived(pipeline.stages.map((s) => s.name));
   let currentIndex = $derived(
     requirement.current_stage_id
       ? stageNames.indexOf(requirement.current_stage_id)
       : -1,
   );
-  let updatedRel = $derived(formatRelative(requirement.updated_at));
 </script>
 
 <a
   href={`/requirements/${requirement.id}`}
-  class="block rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-brand-500 hover:shadow"
+  class="card card-hover block px-4 py-3"
 >
-  <div class="flex items-start justify-between gap-4">
-    <div>
-      <h3 class="text-base font-semibold text-slate-900">{requirement.title}</h3>
-      <p class="mt-1 line-clamp-2 text-sm text-slate-600">{requirement.description}</p>
+  <div class="flex items-center gap-3">
+    <!-- 主要信息：标题 + 描述 -->
+    <div class="min-w-0 flex-1">
+      <div class="flex items-center gap-2">
+        <span class={tagFor(requirement.status)}>
+          {labelFor(requirement.status)}
+        </span>
+        <h3 class="truncate text-sm font-medium text-[var(--color-fg-0)]">
+          {requirement.title}
+        </h3>
+      </div>
+      <p class="mt-1 truncate text-xs text-[var(--color-fg-2)]">
+        {requirement.description}
+      </p>
     </div>
-    <span class={pillClass}>{labelFor(requirement.status)}</span>
+
+    <!-- 元信息列：来源 / 时间 / ID -->
+    <div class="hidden shrink-0 flex-col items-end gap-1 text-xs text-[var(--color-fg-2)] md:flex">
+      <span>{requirement.source}{requirement.source_ref ? ` · ${requirement.source_ref}` : ''}</span>
+      <span class="font-mono text-[11px] text-[var(--color-fg-3)]">
+        {shortId(requirement.id)} · {formatRelative(requirement.updated_at)}
+      </span>
+    </div>
   </div>
 
-  <div class="mt-4">
+  <!-- 流水线进度（细条 + 阶段名） -->
+  <div class="mt-3">
     <PipelineProgress {stageNames} {currentIndex} status={requirement.status} />
   </div>
-
-  <div class="mt-3 flex items-center justify-between text-xs text-slate-500">
-    <span>{requirement.source}{requirement.source_ref ? ` · ${requirement.source_ref}` : ''}</span>
-    <span>updated {updatedRel}</span>
-  </div>
 </a>
-
-<script lang="ts" module>
-  function formatRelative(ts: number): string {
-    const diff = Date.now() - ts;
-    const minute = 60_000;
-    const hour = 60 * minute;
-    const day = 24 * hour;
-    if (diff < minute) return 'just now';
-    if (diff < hour) return `${Math.round(diff / minute)}m ago`;
-    if (diff < day) return `${Math.round(diff / hour)}h ago`;
-    return `${Math.round(diff / day)}d ago`;
-  }
-</script>

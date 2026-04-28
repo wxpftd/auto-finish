@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { stageLabel } from '$lib/i18n';
+
   let {
     status,
     stageName,
@@ -11,40 +13,44 @@
     feedback?: string | null;
   } = $props();
 
-  // Only show for the two states that need attention.
   let visible = $derived(status === 'awaiting_gate' || status === 'awaiting_changes');
+  let isAwaitingGate = $derived(status === 'awaiting_gate');
 
   let title = $derived(
-    status === 'awaiting_gate'
-      ? `Awaiting gate review${stageName ? ` · ${stageName}` : ''}`
-      : `Changes requested${stageName ? ` · ${stageName}` : ''}`,
-  );
-
-  let bannerClass = $derived(
-    status === 'awaiting_gate'
-      ? 'border-amber-300 bg-amber-50 text-amber-900'
-      : 'border-rose-300 bg-rose-50 text-rose-900',
+    isAwaitingGate
+      ? `等待人工评审${stageName ? ` · ${stageLabel(stageName)}` : ''}`
+      : `已请求修改${stageName ? ` · ${stageLabel(stageName)}` : ''}`,
   );
 </script>
 
 {#if visible}
-  <div class={`flex items-start justify-between gap-4 rounded-md border p-4 ${bannerClass}`}>
-    <div>
-      <p class="text-sm font-semibold">{title}</p>
+  <div
+    class="flex items-center gap-3 rounded border px-4 py-3"
+    style="
+      background: {isAwaitingGate ? 'var(--color-warn-soft)' : 'var(--color-danger-soft)'};
+      border-color: {isAwaitingGate ? 'var(--color-warn)' : 'var(--color-danger)'};
+      border-left-width: 3px;
+    "
+  >
+    <span
+      class="dot pulse"
+      style="background: {isAwaitingGate ? 'var(--color-warn)' : 'var(--color-danger)'}"
+    ></span>
+    <div class="min-w-0 flex-1">
+      <p class="text-sm font-medium text-[var(--color-fg-0)]">{title}</p>
       {#if feedback}
-        <p class="mt-1 whitespace-pre-line text-sm opacity-90">{feedback}</p>
+        <p class="mt-1 whitespace-pre-line text-xs text-[var(--color-fg-1)]">{feedback}</p>
       {:else}
-        <p class="mt-1 text-sm opacity-80">
-          A human reviewer needs to inspect the latest artifacts before this requirement can advance.
+        <p class="mt-0.5 text-xs text-[var(--color-fg-2)]">
+          {isAwaitingGate
+            ? '人工查阅最新产物后决定是否放行至下一阶段。'
+            : '等待智能体根据反馈重新交付。'}
         </p>
       {/if}
     </div>
     {#if gateId}
-      <a
-        href={`/gates/${gateId}`}
-        class="shrink-0 rounded bg-white px-3 py-1.5 text-sm font-medium shadow-sm ring-1 ring-inset ring-slate-300 hover:bg-slate-50"
-      >
-        Review
+      <a href={`/gates/${gateId}`} class="btn btn-secondary shrink-0">
+        前往评审
       </a>
     {/if}
   </div>

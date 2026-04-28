@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { stageLabel } from '$lib/i18n';
+
   let {
     stageNames,
     currentIndex,
@@ -6,35 +8,41 @@
   }: {
     stageNames: string[];
     currentIndex: number;
-    /** Free-form requirement status (we accept anything, only special-case
-     * the few that affect rendering). */
     status?: string;
   } = $props();
 
-  // Each segment is `done` (green) | `current` (brand color) | `pending` (slate).
-  // If `status` is `done`, all segments are done.
-  function segmentClass(i: number): string {
-    if (status === 'done') return 'bg-emerald-500';
-    if (status === 'failed' && i === currentIndex) return 'bg-rose-500';
-    if (i < currentIndex) return 'bg-emerald-500';
+  /** 段位颜色：done/current/pending/fail —— 用 1 行细条而不是发光方格 */
+  function segmentColor(i: number): string {
+    if (status === 'done') return 'var(--color-success)';
+    if (status === 'failed' && i === currentIndex) return 'var(--color-danger)';
+    if (i < currentIndex) return 'var(--color-success)';
     if (i === currentIndex) {
-      if (status === 'awaiting_gate') return 'bg-amber-400';
-      if (status === 'awaiting_changes') return 'bg-rose-400';
-      return 'bg-brand-500';
+      if (status === 'awaiting_gate' || status === 'awaiting_changes') {
+        return 'var(--color-warn)';
+      }
+      return 'var(--color-accent)';
     }
-    return 'bg-slate-200';
+    return 'var(--color-bg-4)';
   }
 </script>
 
 <div>
-  <div class="flex gap-1">
+  <!-- 一根细条，按段着色（无发光、无圆角） -->
+  <div class="flex h-1 gap-px overflow-hidden rounded-sm">
     {#each stageNames as _, i (i)}
-      <div class={`h-1.5 flex-1 rounded-full ${segmentClass(i)}`}></div>
+      <div class="flex-1" style="background: {segmentColor(i)}"></div>
     {/each}
   </div>
-  <div class="mt-1.5 flex justify-between text-[10px] uppercase tracking-wide text-slate-500">
+
+  <!-- 阶段名行（中文 + 编号） -->
+  <div class="mt-2 flex justify-between gap-2 text-xs">
     {#each stageNames as name, i (name)}
-      <span class={i === currentIndex ? 'font-semibold text-slate-700' : ''}>{name}</span>
+      {@const active = i === currentIndex}
+      <span
+        class={active ? 'font-medium text-[var(--color-fg-0)]' : 'text-[var(--color-fg-2)]'}
+      >
+        {stageLabel(name)}
+      </span>
     {/each}
   </div>
 </div>

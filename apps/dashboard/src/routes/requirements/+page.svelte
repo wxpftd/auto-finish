@@ -5,13 +5,13 @@
   import type { Requirement, RequirementStatus } from '$lib/api/types';
 
   const statusOptions: { value: RequirementStatus | 'all'; label: string }[] = [
-    { value: 'all', label: 'All' },
-    { value: 'queued', label: 'Queued' },
-    { value: 'running', label: 'Running' },
-    { value: 'awaiting_gate', label: 'Awaiting gate' },
-    { value: 'awaiting_changes', label: 'Changes requested' },
-    { value: 'done', label: 'Done' },
-    { value: 'failed', label: 'Failed' },
+    { value: 'all', label: '全部' },
+    { value: 'queued', label: '排队中' },
+    { value: 'running', label: '执行中' },
+    { value: 'awaiting_gate', label: '待审核' },
+    { value: 'awaiting_changes', label: '请求修改' },
+    { value: 'done', label: '已完成' },
+    { value: 'failed', label: '已失败' },
   ];
 
   let filter = $state<RequirementStatus | 'all'>('all');
@@ -25,48 +25,52 @@
     const f = filter === 'all' ? undefined : { status: filter };
     api
       .listRequirements(f)
-      .then((r) => {
-        requirements = r;
-      })
-      .catch((e: unknown) => {
-        error = e instanceof Error ? e.message : String(e);
-      })
-      .finally(() => {
-        loading = false;
-      });
+      .then((r) => (requirements = r))
+      .catch((e: unknown) => (error = e instanceof Error ? e.message : String(e)))
+      .finally(() => (loading = false));
   });
 </script>
 
-<section class="space-y-6">
-  <header class="flex items-end justify-between">
+<section class="space-y-6 fade-in">
+  <header class="flex items-baseline justify-between">
     <div>
-      <h1 class="text-xl font-semibold text-slate-900">Requirements</h1>
-      <p class="mt-1 text-sm text-slate-600">
-        Live board. Filter by status to focus on what needs attention.
+      <h1 class="text-xl font-semibold">需求</h1>
+      <p class="mt-0.5 text-xs text-[var(--color-fg-2)]">
+        实时面板，按状态筛选。
       </p>
     </div>
-    <select
-      bind:value={filter}
-      class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-    >
-      {#each statusOptions as opt (opt.value)}
-        <option value={opt.value}>{opt.label}</option>
-      {/each}
-    </select>
+    <span class="text-xs text-[var(--color-fg-3)]">
+      共 {requirements.length} 项
+    </span>
   </header>
 
+  <!-- 状态筛选条 -->
+  <div class="flex flex-wrap items-center gap-1 border-b border-[var(--color-line)] pb-2">
+    {#each statusOptions as opt (opt.value)}
+      <button
+        type="button"
+        onclick={() => (filter = opt.value)}
+        class={`tab ${filter === opt.value ? 'tab-active' : ''}`}
+      >
+        {opt.label}
+      </button>
+    {/each}
+  </div>
+
   {#if loading}
-    <p class="text-sm text-slate-500">Loading…</p>
+    <p class="text-xs text-[var(--color-fg-3)]">加载中…</p>
   {:else if error}
-    <p class="text-sm text-rose-600">Error: {error}</p>
+    <div class="card border-[var(--color-danger)] px-4 py-3 text-sm text-[var(--color-danger)]">
+      {error}
+    </div>
   {:else if requirements.length === 0}
-    <p class="text-sm text-slate-500">No requirements match this filter.</p>
+    <div class="card px-4 py-12 text-center text-sm text-[var(--color-fg-2)]">
+      该筛选条件下没有需求。
+    </div>
   {:else}
-    <ul class="space-y-3">
+    <ul class="space-y-2">
       {#each requirements as requirement (requirement.id)}
-        <li>
-          <RequirementCard {requirement} pipeline={mockPipeline} />
-        </li>
+        <li><RequirementCard {requirement} pipeline={mockPipeline} /></li>
       {/each}
     </ul>
   {/if}

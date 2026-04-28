@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from '$lib/api/client';
   import type { StageExecution } from '$lib/api/types';
+  import { shortId, stageExecutionStatusLabels, stageLabel } from '$lib/i18n';
 
   let gates = $state<StageExecution[]>([]);
   let loading = $state(true);
@@ -9,64 +10,62 @@
   $effect(() => {
     api
       .listGates()
-      .then((g) => {
-        gates = g;
-      })
-      .catch((e: unknown) => {
-        error = e instanceof Error ? e.message : String(e);
-      })
-      .finally(() => {
-        loading = false;
-      });
+      .then((g) => (gates = g))
+      .catch((e: unknown) => (error = e instanceof Error ? e.message : String(e)))
+      .finally(() => (loading = false));
   });
 
-  function statusStyle(status: string): string {
-    if (status === 'awaiting_gate') return 'bg-amber-100 text-amber-800 ring-amber-200';
-    if (status === 'gate_approved' || status === 'succeeded') {
-      return 'bg-emerald-100 text-emerald-800 ring-emerald-200';
-    }
-    if (status === 'gate_rejected' || status === 'failed') {
-      return 'bg-rose-100 text-rose-800 ring-rose-200';
-    }
-    return 'bg-slate-100 text-slate-700 ring-slate-200';
-  }
+  const tagFor: Record<string, string> = {
+    awaiting_gate: 'tag-warn',
+    gate_approved: 'tag-success',
+    succeeded: 'tag-success',
+    gate_rejected: 'tag-danger',
+    failed: 'tag-danger',
+  };
 </script>
 
-<section class="space-y-6">
-  <header>
-    <h1 class="text-xl font-semibold text-slate-900">Gates</h1>
-    <p class="mt-1 text-sm text-slate-600">
-      Stage executions awaiting human review.
-    </p>
+<section class="space-y-6 fade-in">
+  <header class="flex items-baseline justify-between">
+    <div>
+      <h1 class="text-xl font-semibold">关卡评审</h1>
+      <p class="mt-0.5 text-xs text-[var(--color-fg-2)]">
+        等待人工放行或驳回的阶段执行。
+      </p>
+    </div>
+    <span class="text-xs text-[var(--color-fg-3)]">{gates.length} 项</span>
   </header>
 
   {#if loading}
-    <p class="text-sm text-slate-500">Loading…</p>
+    <p class="text-xs text-[var(--color-fg-3)]">加载中…</p>
   {:else if error}
-    <p class="text-sm text-rose-600">Error: {error}</p>
+    <div class="card border-[var(--color-danger)] px-4 py-3 text-sm text-[var(--color-danger)]">
+      {error}
+    </div>
   {:else if gates.length === 0}
-    <p class="text-sm text-slate-500">No gates pending.</p>
+    <div class="card px-4 py-12 text-center text-sm text-[var(--color-fg-2)]">
+      没有待评审的关卡。
+    </div>
   {:else}
-    <ul class="space-y-3">
+    <ul class="card divide-y divide-[var(--color-line)]">
       {#each gates as gate (gate.id)}
         <li>
-          <a
-            href={`/gates/${gate.id}`}
-            class="block rounded-md border border-slate-200 bg-white p-4 shadow-sm transition hover:border-brand-500 hover:shadow"
-          >
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="text-sm font-medium text-slate-900">
-                  Stage: <span class="font-mono text-xs">{gate.stage_name}</span>
-                </p>
-                <p class="mt-1 text-xs text-slate-500">
-                  Run <span class="font-mono">{gate.run_id}</span>
-                </p>
+          <a href={`/gates/${gate.id}`} class="row row-hover">
+            <span class="dot pulse bg-[var(--color-warn)]"></span>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2">
+                <span class="text-sm font-medium">{stageLabel(gate.stage_name)}</span>
+                <span class="font-mono text-[11px] text-[var(--color-fg-3)]">
+                  {gate.stage_name}
+                </span>
               </div>
-              <span class={`pill ring-1 ring-inset ${statusStyle(gate.status)}`}>
-                {gate.status.replaceAll('_', ' ')}
-              </span>
+              <p class="mt-0.5 font-mono text-[11px] text-[var(--color-fg-3)]">
+                run · {shortId(gate.run_id)} · gate · {shortId(gate.id)}
+              </p>
             </div>
+            <span class={`tag ${tagFor[gate.status] ?? 'tag-neutral'}`}>
+              {stageExecutionStatusLabels[gate.status] ?? gate.status}
+            </span>
+            <span class="text-xs text-[var(--color-fg-3)]">→</span>
           </a>
         </li>
       {/each}
