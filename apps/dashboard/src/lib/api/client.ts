@@ -77,6 +77,8 @@ export interface Api {
     feedback?: string,
     decidedBy?: string,
   ): Promise<{ stage: StageExecution; decision: unknown }>;
+  /** List artifacts attached to a single stage_execution. */
+  listArtifactsForStage(stageExecutionId: string): Promise<Artifact[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -257,9 +259,18 @@ export class HttpApi implements Api {
       stages: [],
     };
 
-    // No artifacts list endpoint exists yet; keep an empty array so the UI
-    // gracefully degrades (preview blocks already guard `artifacts.length > 0`).
-    const artifacts: Artifact[] = [];
+    let artifacts: Artifact[] = [];
+    if (run) {
+      try {
+        artifacts = await this.req<Artifact[]>(
+          `/artifacts/run/${encodeURIComponent(run.id)}`,
+          'artifacts',
+        );
+      } catch (err) {
+        // Artifacts list is optional; let the rest of the page render.
+        if (!(err instanceof ApiError) || err.status !== 404) throw err;
+      }
+    }
 
     return {
       requirement,
@@ -289,6 +300,11 @@ export class HttpApi implements Api {
       });
     }
     return found;
+  }
+
+  listArtifactsForStage(stageExecutionId: string): Promise<Artifact[]> {
+    const enc = encodeURIComponent(stageExecutionId);
+    return this.req<Artifact[]>(`/artifacts/stage/${enc}`, 'artifacts');
   }
 
   async decideGate(
@@ -439,6 +455,13 @@ export class MockApi implements Api {
       });
     }
     return { ...stage };
+  }
+
+  async listArtifactsForStage(stageExecutionId: string): Promise<Artifact[]> {
+    await this.wait();
+    return mockArtifacts
+      .filter((a) => a.stage_execution_id === stageExecutionId)
+      .map((a) => ({ ...a }));
   }
 
   async decideGate(

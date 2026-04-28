@@ -15,6 +15,15 @@
   }
 </script>
 
+<svelte:head>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link
+    rel="stylesheet"
+    href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+  />
+</svelte:head>
+
 <div class="min-h-screen">
   <header class="border-b border-[var(--color-line)] bg-[var(--color-bg-1)]">
     <div class="mx-auto flex h-12 max-w-6xl items-center gap-6 px-6">

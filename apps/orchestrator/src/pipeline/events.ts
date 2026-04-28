@@ -112,6 +112,26 @@ export interface ColdRestartEvent {
   reason: string;
 }
 
+/**
+ * High-frequency mirror of a single Claude stream event appended to the
+ * stage_executions.events_json buffer. Published on a separate WS topic
+ * (`run:{id}:debug`) so the default dashboard view — which subscribes to
+ * `run:{id}` — is not flooded; only the developer view opts into it.
+ *
+ * `event` is the loose `Record<string, unknown>` shape persisted in
+ * `events_json` (kind / ts plus event-specific fields). Treating it as
+ * structurally untyped here keeps this module decoupled from
+ * `claude/stage-event.ts` and avoids a type-only cycle.
+ */
+export interface StageEventAppendedEvent {
+  kind: 'stage_event_appended';
+  run_id: string;
+  stage_execution_id: string;
+  stage_name: string;
+  event: Record<string, unknown>;
+  at: string;
+}
+
 /** Discriminated union of every pipeline event. */
 export type PipelineEvent =
   | RunStartedEvent
@@ -124,7 +144,8 @@ export type PipelineEvent =
   | RunCompletedEvent
   | RunFailedEvent
   | RunPausedEvent
-  | ColdRestartEvent;
+  | ColdRestartEvent
+  | StageEventAppendedEvent;
 
 /** Convenience: every kind string in the union. */
 export type PipelineEventKind = PipelineEvent['kind'];

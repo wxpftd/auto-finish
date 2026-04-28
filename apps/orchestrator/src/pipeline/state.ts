@@ -173,5 +173,13 @@ export function reduceRunStatus(
       // does not transition the run before emitting this event).
       return current;
     }
+
+    case 'stage_event_appended': {
+      // Pure observability mirror of a single Claude stream event. The run
+      // status is derived from coarse-grained PipelineEvents only — these
+      // never change it. (Published on `run:{id}:debug` topic, default
+      // dashboard subscribers don't see them.)
+      return current;
+    }
   }
 }

@@ -19,6 +19,7 @@ import { buildPipelinesRoute } from './routes/pipelines.js';
 import { buildRequirementsRoute } from './routes/requirements.js';
 import { buildRunsRoute } from './routes/runs.js';
 import { buildGatesRoute } from './routes/gates.js';
+import { buildArtifactsRoute } from './routes/artifacts.js';
 
 export interface AppDeps {
   db: Db;
@@ -58,6 +59,7 @@ export function buildApp(deps: AppDeps): Hono {
   app.route('/api/requirements', buildRequirementsRoute(deps));
   app.route('/api/runs', buildRunsRoute(deps));
   app.route('/api/gates', buildGatesRoute({ db: deps.db, bus: deps.bus }));
+  app.route('/api/artifacts', buildArtifactsRoute({ db: deps.db }));
 
   app.notFound((c) =>
     c.json({ error: 'not_found', message: `route not found: ${c.req.path}` }, 404),

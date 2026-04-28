@@ -1,9 +1,11 @@
 <script lang="ts">
   import GateBanner from '$lib/components/GateBanner.svelte';
   import PipelineProgress from '$lib/components/PipelineProgress.svelte';
+  import StageDetailDrawer from '$lib/components/StageDetailDrawer.svelte';
   import { api } from '$lib/api/client';
   import { connectWs, type WsClientHandle } from '$lib/api/ws';
   import type {
+    Artifact,
     PipelineEvent,
     RequirementStatus,
     StageExecution,
@@ -26,6 +28,21 @@
   let log = $state<LogEntry[]>([]);
   let liveConnected = $state(false);
   let liveError = $state<string | null>(null);
+  let openStageId = $state<string | null>(null);
+  let devView = $state(false);
+  let devEvents = $state<{ at: number; ev: PipelineEvent }[]>([]);
+  let devConnected = $state(false);
+
+  const DEV_TAIL = 200;
+
+  let openStage = $derived(
+    openStageId ? stages.find((s) => s.id === openStageId) ?? null : null,
+  );
+  let openStageArtifacts = $derived(
+    openStageId
+      ? data.artifacts.filter((a: Artifact) => a.stage_execution_id === openStageId)
+      : [],
+  );
 
   $effect(() => {
     const reqId = data.requirement.id;
@@ -34,6 +51,8 @@
     liveStatus = data.requirement.status;
     currentStage = data.requirement.current_stage_id;
     log = [];
+    openStageId = null;
+    devEvents = [];
   });
 
   let stageNames = $derived(data.pipeline.stages.map((s) => s.name));
@@ -104,6 +123,33 @@
     return () => handle?.close();
   });
 
+  $effect(() => {
+    const runId = data.run?.id;
+    if (!runId || !devView) {
+      devConnected = false;
+      return;
+    }
+    let handle: WsClientHandle | null = null;
+    try {
+      handle = connectWs({
+        filter: `run:${runId}:debug`,
+        onEvent: (ev) => {
+          devEvents = [
+            ...devEvents.slice(-DEV_TAIL + 1),
+            { at: Date.now(), ev },
+          ];
+        },
+        onClose: () => (devConnected = false),
+      });
+      handle.ready
+        .then(() => (devConnected = true))
+        .catch(() => (devConnected = false));
+    } catch {
+      devConnected = false;
+    }
+    return () => handle?.close();
+  });
+
   function fmtClock(ts: number): string {
     const d = new Date(ts);
     return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
@@ -134,6 +180,14 @@
         ></span>
         {liveConnected ? '实时' : liveError ? '离线' : '连接中'}
       </span>
+      <button
+        type="button"
+        class={`tab ${devView ? 'tab-active' : ''}`}
+        onclick={() => (devView = !devView)}
+        title="开启后订阅每条 Claude 流事件，用于工具自身调试"
+      >
+        {devView ? '开发者视图 ●' : '开发者视图'}
+      </button>
     </div>
 
     <p class="mt-2 max-w-3xl text-xs text-[var(--color-fg-1)]">
@@ -173,20 +227,35 @@
     {#if stages.length > 0}
       <ul class="card mt-2 divide-y divide-[var(--color-line)]">
         {#each stages as se (se.id)}
-          <li class="row">
-            <span class="dot" style="background: {seColor[se.status] ?? 'var(--color-fg-3)'}"></span>
-            <span class="flex-1 text-sm text-[var(--color-fg-0)]">
-              {stageLabel(se.stage_name)}
-            </span>
-            <span class="font-mono text-[11px] text-[var(--color-fg-3)]">
-              {se.stage_name}
-            </span>
-            <span class="text-xs" style="color: {seColor[se.status] ?? 'var(--color-fg-3)'}">
-              {stageExecutionStatusLabels[se.status] ?? se.status}
-            </span>
+          <li>
+            <button
+              type="button"
+              class="row row-hover w-full text-left"
+              onclick={() => (openStageId = se.id)}
+            >
+              <span class="dot" style="background: {seColor[se.status] ?? 'var(--color-fg-3)'}"></span>
+              <span class="flex-1 text-sm text-[var(--color-fg-0)]">
+                {stageLabel(se.stage_name)}
+              </span>
+              <span class="font-mono text-[11px] text-[var(--color-fg-3)]">
+                {se.stage_name}
+              </span>
+              {#if Array.isArray(se.events_json) && se.events_json.length > 0}
+                <span class="text-[11px] text-[var(--color-fg-3)]">
+                  {se.events_json.length} 事件
+                </span>
+              {/if}
+              <span class="text-xs" style="color: {seColor[se.status] ?? 'var(--color-fg-3)'}">
+                {stageExecutionStatusLabels[se.status] ?? se.status}
+              </span>
+              <span class="text-[var(--color-fg-3)]">›</span>
+            </button>
           </li>
         {/each}
       </ul>
+      <p class="mt-1.5 text-[11px] text-[var(--color-fg-3)]">
+        点击任一阶段查看事件流、工具调用、产物
+      </p>
     {/if}
   </div>
 
@@ -217,7 +286,7 @@
               <span class="tag tag-neutral">{artifact.type}</span>
             </div>
             {#if artifact.preview}
-              <pre class="overflow-x-auto bg-[var(--color-bg-1)] px-4 py-3 font-mono text-[11px] leading-6 text-[var(--color-fg-1)]">{artifact.preview}</pre>
+              <pre class="pre-soft bg-[var(--color-bg-1)] px-4 py-3 font-mono text-[11px] leading-6 text-[var(--color-fg-1)]">{artifact.preview}</pre>
             {/if}
           </li>
         {/each}
@@ -226,6 +295,64 @@
   {/if}
 
   <!-- Pull Requests -->
+  <StageDetailDrawer
+    stage={openStage}
+    artifacts={openStageArtifacts}
+    onClose={() => (openStageId = null)}
+  />
+
+  {#if devView}
+    <aside
+      class="fixed bottom-3 right-3 z-30 flex h-[60vh] w-[26rem] flex-col rounded-md border border-[var(--color-line-strong)] bg-[var(--color-bg-1)] shadow-xl fade-in"
+      aria-label="开发者事件流"
+    >
+      <header class="flex items-center gap-2 border-b border-[var(--color-line)] px-3 py-2">
+        <span class="caption">Raw event stream</span>
+        <span class={`dot ${devConnected ? 'pulse bg-[var(--color-success)]' : 'bg-[var(--color-fg-3)]'}`}></span>
+        <span class="text-[11px] text-[var(--color-fg-3)]">
+          {devEvents.length}/{DEV_TAIL}
+        </span>
+        <button
+          type="button"
+          class="ml-auto tab"
+          onclick={() => (devEvents = [])}
+        >
+          清空
+        </button>
+        <button
+          type="button"
+          class="tab"
+          onclick={() => (devView = false)}
+          aria-label="关闭开发者视图"
+        >
+          ✕
+        </button>
+      </header>
+      <ol class="flex-1 overflow-y-auto px-2 py-1.5 font-mono text-[11px] leading-5">
+        {#if devEvents.length === 0}
+          <li class="px-1 py-3 text-center text-[var(--color-fg-3)]">
+            等待事件…触发一次需求执行后会有 stage_event_appended 流入
+          </li>
+        {/if}
+        {#each devEvents as entry, i (i)}
+          <li class="border-b border-[var(--color-line)]/40 px-1 py-1">
+            <div class="flex items-baseline gap-2">
+              <span class="text-[var(--color-fg-3)]">{fmtClock(entry.at)}</span>
+              <span class="font-medium text-[var(--color-accent)]">
+                {entry.ev.kind}
+              </span>
+              {#if entry.ev.kind === 'stage_event_appended'}
+                <span class="text-[var(--color-fg-2)]">
+                  {entry.ev.stage_name} · {String(entry.ev.event.type)}
+                </span>
+              {/if}
+            </div>
+          </li>
+        {/each}
+      </ol>
+    </aside>
+  {/if}
+
   {#if data.pull_requests.length > 0}
     <div>
       <h2 class="caption mb-2">Pull Requests</h2>

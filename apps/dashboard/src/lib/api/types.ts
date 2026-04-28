@@ -343,6 +343,21 @@ export interface ColdRestartEvent {
   reason: string;
 }
 
+/**
+ * Mirror of a single Claude stream event appended to stage_executions.events_json.
+ * Published only on `run:{id}:debug` topic (developer-view subscription),
+ * not on the default `run:{id}` topic. The `event` field is the persisted
+ * StageEventRow shape (kind/ts plus event-specific fields).
+ */
+export interface StageEventAppendedEvent {
+  kind: 'stage_event_appended';
+  run_id: string;
+  stage_execution_id: string;
+  stage_name: string;
+  event: StageEventRow;
+  at: string;
+}
+
 export type PipelineEvent =
   | RunStartedEvent
   | StageStartedEvent
@@ -354,7 +369,8 @@ export type PipelineEvent =
   | RunCompletedEvent
   | RunFailedEvent
   | RunPausedEvent
-  | ColdRestartEvent;
+  | ColdRestartEvent
+  | StageEventAppendedEvent;
 
 export type PipelineEventKind = PipelineEvent['kind'];
 

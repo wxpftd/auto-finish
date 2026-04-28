@@ -158,6 +158,12 @@ export function reduceEvent(
           now,
         ),
       };
+    case 'stage_event_appended':
+      // Streamed only on `run:{id}:debug` (developer view); the default
+      // requirement page never sees these. We're a no-op here so the main
+      // page reducer stays compact — the developer dock listens on its own
+      // ws connection and renders directly.
+      return state;
     default: {
       const exhaustive: never = ev;
       throw new Error(

@@ -22,3 +22,4 @@ export * as pipeline_runs from './repositories/pipeline_runs.js';
 export * as stage_executions from './repositories/stage_executions.js';
 export * as gate_decisions from './repositories/gate_decisions.js';
 export * as pull_requests from './repositories/pull_requests.js';
+export * as artifacts from './repositories/artifacts.js';
