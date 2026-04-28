@@ -12,3 +12,6 @@ dist/
 coverage/
 .turbo/
 .smoke-logs/
+
+# Per-user state from Claude Code: scoped permissions + scheduled-task lock.
+.claude/
