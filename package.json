@@ -17,7 +17,7 @@
     "dev:down": "pm2 delete ecosystem.config.cjs"
   },
   "devDependencies": {
-    "pm2": "^6.0.14",
+    "pm2": "^7.0.1",
     "typescript": "^5.6.0"
   },
   "engines": {
