@@ -15,7 +15,7 @@
     "@alibaba-group/opensandbox": "^0.1.5",
     "@auto-finish/pipeline-schema": "workspace:*",
     "@auto-finish/project-schema": "workspace:*",
-    "@hono/node-server": "^2.0.0",
+    "@hono/node-server": "^2.0.1",
     "better-sqlite3": "^12.9.0",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.15",
